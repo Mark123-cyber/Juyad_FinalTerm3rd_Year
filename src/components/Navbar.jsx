@@ -16,26 +16,26 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
-        <Link to="/dashboard" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-white">
-            <BellRing className="h-5 w-5" />
+    <header className="site-header">
+      <div className="navbar-inner">
+        <Link to="/dashboard" className="brand-link">
+          <div className="brand-icon">
+            <BellRing size={19} />
           </div>
-          <div className="leading-tight">
-            <p className="text-sm font-semibold text-slate-900">SLSU</p>
-            <p className="text-xs text-slate-500">Campus Lost &amp; Found</p>
+          <div className="brand-copy">
+            <span>SLSU</span>
+            <small>Campus Lost &amp; Found</small>
           </div>
         </Link>
 
-        <nav className="hidden items-center gap-1 sm:flex">
+        <nav className="main-nav" aria-label="Main navigation">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+              className="nav-link"
             >
-              <Icon className="h-4 w-4" />
+              <Icon size={16} />
               {label}
             </Link>
           ))}
@@ -44,27 +44,13 @@ export default function Navbar() {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+          className="logout-button"
         >
-          <LogOut className="h-4 w-4" />
-          <span className="hidden sm:inline">Logout</span>
+          <LogOut size={16} />
+          <span>Logout</span>
         </button>
       </div>
 
-      <nav className="sm:hidden">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 px-2 pb-2">
-          {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
-            <Link
-              key={to}
-              to={to}
-              className="flex flex-1 flex-col items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
-            >
-              <Icon className="h-4 w-4" />
-              {label.split(' ')[0]}
-            </Link>
-          ))}
-        </div>
-      </nav>
     </header>
   )
 }

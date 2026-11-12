@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 
-const ItemContext = createContext()
+const ItemContext = createContext(null)
 
 // A few seed items so the lists aren't empty on first load.
 const SEED_ITEMS = [
@@ -31,8 +31,8 @@ export function ItemProvider({ children }) {
     setItems((prev) => [
       {
         ...item,
-        id: `item-${Date.now()}`,
-        date: new Date().toISOString().slice(0, 10),
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        date: new Date().toLocaleDateString('en-CA'),
       },
       ...prev,
     ])
