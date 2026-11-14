@@ -1,16 +1,10 @@
-# React + Vite
+# SLSU Lost and Found
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## Open the app on a phone over this PC's hotspot
 
-Currently, two official plugins are available:
+1. Turn on the mobile hotspot on this PC and connect the phone to it.
+2. In this folder, start the app with `npm run dev` (run `npm install` first if dependencies are not installed).
+3. On the PC, run `ipconfig` and find the IPv4 address for the hotspot network adapter.
+4. In Chrome on the phone, open `http://<PC-IPv4-address>:5173`, replacing the placeholder with that address (for example, `http://192.168.137.1:5173`).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Keep the development server running while using the app. If the phone cannot connect, allow Node.js/Vite through Windows Defender Firewall on the private network, and verify both devices are connected to the same hotspot. This development server listens on the PC's network interfaces; use it only on a trusted network.
