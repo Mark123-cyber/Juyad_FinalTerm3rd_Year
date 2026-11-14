@@ -1,6 +1,6 @@
 import { CalendarDays, MapPin, PackageOpen } from 'lucide-react'
 
-export default function ItemListView({ title, description, items }) {
+export default function ItemListView({ title, description, items, loading, error }) {
   return (
     <main className="page-shell">
       <section className="page-header stacked">
@@ -11,7 +11,10 @@ export default function ItemListView({ title, description, items }) {
         </div>
       </section>
 
-      {items.length > 0 ? (
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {loading ? (
+        <p className="empty-inline">Loading reports…</p>
+      ) : items.length > 0 ? (
         <section className="item-grid" aria-label={title}>
           {items.map((item) => (
             <article key={item.id} className="item-card">

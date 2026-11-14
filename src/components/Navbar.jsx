@@ -1,7 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { LogOut, LayoutDashboard, Search, BellRing, PackageOpen } from 'lucide-react'
+import { LogOut, LayoutDashboard, Search, BellRing, PackageOpen, ShieldCheck } from 'lucide-react'
+import { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 
-const NAV_ITEMS = [
+const USER_NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/lost', label: 'Lost Items', icon: Search },
   { to: '/found', label: 'Found Items', icon: PackageOpen },
@@ -10,8 +12,20 @@ const NAV_ITEMS = [
 
 export default function Navbar() {
   const navigate = useNavigate()
+  const { user, signOut } = useAuth()
+  const [error, setError] = useState('')
+  const navItems = user?.role === 'admin'
+    ? [...USER_NAV_ITEMS, { to: '/admin', label: 'Admin', icon: ShieldCheck }]
+    : USER_NAV_ITEMS
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    setError('')
+    try {
+      await signOut()
+    } catch (logoutError) {
+      setError(logoutError.message)
+      return
+    }
     navigate('/')
   }
 
@@ -29,7 +43,7 @@ export default function Navbar() {
         </Link>
 
         <nav className="main-nav" aria-label="Main navigation">
-          {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+          {navItems.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
@@ -41,6 +55,7 @@ export default function Navbar() {
           ))}
         </nav>
 
+        <span className="account-name">{user?.fullName}</span>
         <button
           type="button"
           onClick={handleLogout}
@@ -50,7 +65,7 @@ export default function Navbar() {
           <span>Logout</span>
         </button>
       </div>
-
+      {error && <p className="nav-error" role="alert">{error}</p>}
     </header>
   )
 }

@@ -13,23 +13,31 @@ export default function ReportItemView() {
   const navigate = useNavigate()
   const { addItem } = useItems()
   const [form, setForm] = useState(initialForm)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const handleChange = (event) => {
     const { name, value } = event.target
     setForm((current) => ({ ...current, [name]: value }))
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-
-    addItem({
-      title: form.title.trim(),
-      description: form.description.trim(),
-      location: form.location.trim(),
-      type: form.type,
-    })
-
-    navigate(form.type === 'lost' ? '/lost' : '/found')
+    setError('')
+    setSubmitting(true)
+    try {
+      await addItem({
+        title: form.title.trim(),
+        description: form.description.trim(),
+        location: form.location.trim(),
+        type: form.type,
+      })
+      navigate(form.type === 'lost' ? '/lost' : '/found')
+    } catch (submitError) {
+      setError(submitError.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -84,7 +92,8 @@ export default function ReportItemView() {
           </select>
         </label>
 
-        <button type="submit" className="primary-btn submit-btn">Submit report</button>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button type="submit" className="primary-btn submit-btn" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit report'}</button>
       </form>
     </main>
   )

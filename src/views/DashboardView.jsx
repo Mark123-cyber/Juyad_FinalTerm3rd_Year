@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useItems } from '../contexts/ItemContext'
 
 export default function DashboardView() {
-  const { items } = useItems()
+  const { items, loading, error } = useItems()
   const lostCount = items.filter((item) => item.type === 'lost').length
   const foundCount = items.filter((item) => item.type === 'found').length
 
@@ -36,6 +36,7 @@ export default function DashboardView() {
         </article>
       </section>
 
+      {error && <p className="form-error" role="alert">{error}</p>}
       <section className="panel">
         <div className="panel-header spaced">
           <div>
@@ -48,7 +49,9 @@ export default function DashboardView() {
           </div>
         </div>
 
-        {items.length > 0 ? (
+        {loading ? (
+          <p className="empty-inline">Loading reports…</p>
+        ) : items.length > 0 ? (
           <div className="table-wrap">
             <table>
               <thead>
