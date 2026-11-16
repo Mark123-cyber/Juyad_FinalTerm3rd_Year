@@ -62,15 +62,31 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
 
   const studentIdLogin = await request('/api/auth/login', {
     method: 'POST',
-    body: { emailOrStudentId: 'slsu-2026-00123', password: 'student-password-123' },
+    body: { emailOrStudentId: 'slsu-2026-00123', password: 'student-password-123', accountType: 'student' },
   })
   assert.equal(studentIdLogin.response.status, 200)
 
   const emailLogin = await request('/api/auth/login', {
     method: 'POST',
-    body: { emailOrStudentId: 'SAMPLE.STUDENT@example.com', password: 'student-password-123' },
+    body: {
+      emailOrStudentId: 'SAMPLE.STUDENT@example.com',
+      password: 'student-password-123',
+      accountType: 'student',
+      rememberMe: true,
+    },
   })
   assert.equal(emailLogin.response.status, 200)
+  assert.match(emailLogin.response.headers.getSetCookie()[0], /Expires=/i)
+
+  const studentUsingStaffLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: {
+      emailOrStudentId: 'slsu-2026-00123',
+      password: 'student-password-123',
+      accountType: 'staff',
+    },
+  })
+  assert.equal(studentUsingStaffLogin.response.status, 401)
 
   const duplicateStudentId = await request('/api/auth/signup', {
     method: 'POST',
@@ -123,9 +139,21 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
 
   const adminLogin = await request('/api/auth/login', {
     method: 'POST',
-    body: { emailOrStudentId: 'test-admin', password: 'test-admin-password-12345' },
+    body: { emailOrStudentId: 'test-admin', password: 'test-admin-password-12345', accountType: 'staff' },
   })
   assert.equal(adminLogin.response.status, 200)
+  assert.doesNotMatch(adminLogin.response.headers.getSetCookie()[0], /Expires=/i)
+
+  const staffUsingStudentLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: {
+      emailOrStudentId: 'test-admin',
+      password: 'test-admin-password-12345',
+      accountType: 'student',
+    },
+  })
+  assert.equal(staffUsingStudentLogin.response.status, 401)
+
   const adminUsers = await request('/api/admin/users', { cookie: adminLogin.cookie })
   assert.equal(adminUsers.response.status, 200)
   assert.equal(adminUsers.payload.find((user) => user.login === 'test-admin').isFixedAdmin, true)
@@ -147,7 +175,11 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
 
   const adminCreatedStudentLogin = await request('/api/auth/login', {
     method: 'POST',
-    body: { emailOrStudentId: 'SLSU-2026-00222', password: 'temporary-password-123' },
+    body: {
+      emailOrStudentId: 'SLSU-2026-00222',
+      password: 'temporary-password-123',
+      accountType: 'student',
+    },
   })
   assert.equal(adminCreatedStudentLogin.response.status, 200)
 

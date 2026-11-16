@@ -28,10 +28,10 @@ export function AuthProvider({ children }) {
     return () => { active = false }
   }, [])
 
-  const signIn = async (emailOrStudentId, password) => {
+  const signIn = async (emailOrStudentId, password, accountType, rememberMe) => {
     const result = await apiRequest('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ emailOrStudentId, password }),
+      body: JSON.stringify({ emailOrStudentId, password, accountType, rememberMe }),
     })
     setError('')
     setUser(result.user)

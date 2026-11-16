@@ -203,18 +203,19 @@ function requireAdmin(request, response, next) {
   return next()
 }
 
-function createSession(user, response) {
+function createSession(user, response, rememberMe = false) {
   const token = randomBytes(32).toString('hex')
   const expiresAt = Date.now() + sessionLifetime
   db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
     .run(createHash('sha256').update(token).digest('hex'), user.id, expiresAt)
-  response.cookie(cookieName, token, {
+  const cookieOptions = {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
-    expires: new Date(expiresAt),
     path: '/',
-  })
+  }
+  if (rememberMe) cookieOptions.expires = new Date(expiresAt)
+  response.cookie(cookieName, token, cookieOptions)
 }
 
 function requireFields(values, fields) {
@@ -261,20 +262,26 @@ app.post('/api/auth/signup', loginLimiter, (request, response) => {
     INSERT INTO users (id, full_name, login, student_id, email, campus, role, password_hash, created_at)
     VALUES (?, ?, ?, ?, ?, ?, 'user', ?, ?)
   `).run(user.id, user.full_name, user.login, user.student_id, user.email, user.campus, hashPassword(password), user.created_at)
-  createSession(user, response)
+  createSession(user, response, true)
   response.status(201).json({ user: publicUser(user) })
 })
 
 app.post('/api/auth/login', loginLimiter, (request, response) => {
   const login = cleanText(request.body.emailOrStudentId)
   const password = typeof request.body.password === 'string' ? request.body.password : ''
+  const accountType = cleanText(request.body.accountType)
+  const rememberMe = request.body.rememberMe === true
+  if (accountType !== 'student' && accountType !== 'staff') {
+    throw new HttpError(400, 'Choose Student or SSC / Admin / Registrar to sign in.')
+  }
   if (login.length > 120 || password.length > 128) throw new HttpError(400, 'Email/student ID or password is too long.')
   const user = findUserByIdentifier(login)
   const validPassword = verifyPassword(password, user?.password_hash || dummyPasswordHash)
-  if (!user || !validPassword) {
+  const expectedRole = accountType === 'staff' ? 'admin' : 'user'
+  if (!user || !validPassword || user.role !== expectedRole) {
     throw new HttpError(401, 'Email/student ID or password is incorrect.')
   }
-  createSession(user, response)
+  createSession(user, response, rememberMe)
   response.json({ user: publicUser(user) })
 })
 

@@ -66,13 +66,63 @@
   line-height: 1.55;
 }
 
+.auth-account-type {
+  min-width: 0;
+  margin: 22px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.auth-account-type legend {
+  margin-bottom: 9px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.auth-account-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auth-account-options label {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #d5dce5;
+  border-radius: 12px;
+  background: #fff;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.auth-account-options label.selected {
+  border-color: #475569;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.auth-account-options input {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: #1e293b;
+}
+
 .auth-tabs {
   position: relative;
   isolation: isolate;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 5px;
-  margin: 26px 0 22px;
+  margin: 18px 0 22px;
   padding: 5px;
   border-radius: 999px;
   background: #e9eef4;
@@ -94,6 +144,14 @@
 
 .auth-tabs.is-sign-up::before {
   transform: translateX(100%);
+}
+
+.auth-tabs.is-staff {
+  grid-template-columns: 1fr;
+}
+
+.auth-tabs.is-staff::before {
+  width: calc(100% - 10px);
 }
 
 .auth-tab {
@@ -244,6 +302,33 @@
   background: transparent;
   color: #64748b;
   cursor: pointer;
+}
+
+.password-toggle:hover {
+  color: #0f172a;
+}
+
+.password-toggle:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid #64748b;
+  outline-offset: 2px;
+}
+
+.remember-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 1px 0 2px;
+  color: #475569;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.remember-me input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #1e293b;
 }
 
 .primary-btn,
@@ -1082,6 +1167,15 @@ tbody tr:last-child td {
 
   .auth-tabs {
     margin-top: 22px;
+  }
+
+  .auth-account-options {
+    gap: 6px;
+  }
+
+  .auth-account-options label {
+    gap: 6px;
+    font-size: 0.72rem;
   }
 
   .panel,

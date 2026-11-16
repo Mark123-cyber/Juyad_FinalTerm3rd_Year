@@ -8,7 +8,9 @@ export default function AuthView() {
   const navigate = useNavigate()
   const { signIn, signUp, error: serverError } = useAuth()
   const [mode, setMode] = useState('sign-in')
+  const [accountType, setAccountType] = useState('student')
   const [showPassword, setShowPassword] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
   const [campuses, setCampuses] = useState([])
   const [campusError, setCampusError] = useState('')
@@ -35,6 +37,7 @@ export default function AuthView() {
     const formData = new FormData(event.currentTarget)
     const emailOrStudentId = String(formData.get('emailOrStudentId') || '').trim()
     const password = String(formData.get('password') || '')
+    const shouldRemember = formData.get('rememberMe') === 'on'
     const fullName = String(formData.get('fullName') || '').trim()
     const studentId = String(formData.get('studentId') || '').trim()
     const email = String(formData.get('email') || '').trim()
@@ -67,7 +70,7 @@ export default function AuthView() {
     try {
       const user = isSignUp
         ? await signUp({ fullName, campus, studentId, email, password })
-        : await signIn(emailOrStudentId, password)
+        : await signIn(emailOrStudentId, password, accountType, shouldRemember)
       navigate(user.role === 'admin' ? '/admin' : '/dashboard', { replace: true })
     } catch (submitError) {
       setError(submitError.message)
@@ -82,17 +85,50 @@ export default function AuthView() {
     setShowPassword(false)
   }
 
+  const switchAccountType = (nextType) => {
+    setAccountType(nextType)
+    if (nextType === 'staff') setMode('sign-in')
+    setError('')
+    setShowPassword(false)
+  }
+
   return (
     <main className="auth-page">
       <div className="auth-layout">
         <section className="auth-card" aria-labelledby="auth-title">
           <header className="auth-header">
             <p className="auth-university">Southern Leyte State University</p>
-            <h1 key={mode} id="auth-title" className="auth-title-enter">{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
+            <h1 key={`${mode}-${accountType}`} id="auth-title" className="auth-title-enter">{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
             <p className="auth-intro">Campus Lost &amp; Found Portal</p>
           </header>
 
-          <div className={isSignUp ? 'auth-tabs is-sign-up' : 'auth-tabs'} role="tablist" aria-label="Account access">
+          <fieldset className="auth-account-type">
+            <legend>Choose your account type</legend>
+            <div className="auth-account-options" role="radiogroup" aria-label="Account type">
+              <label className={accountType === 'student' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="accountType"
+                  value="student"
+                  checked={accountType === 'student'}
+                  onChange={() => switchAccountType('student')}
+                />
+                <span>Student</span>
+              </label>
+              <label className={accountType === 'staff' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="accountType"
+                  value="staff"
+                  checked={accountType === 'staff'}
+                  onChange={() => switchAccountType('staff')}
+                />
+                <span>SSC / Admin / Registrar</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div className={`auth-tabs${isSignUp ? ' is-sign-up' : ''}${accountType === 'staff' ? ' is-staff' : ''}`} role="tablist" aria-label="Account access">
             <button
               type="button"
               role="tab"
@@ -102,15 +138,17 @@ export default function AuthView() {
             >
               Sign In
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={isSignUp}
-              className={isSignUp ? 'auth-tab active' : 'auth-tab'}
-              onClick={() => switchMode('sign-up')}
-            >
-              Sign Up
-            </button>
+            {accountType === 'student' && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={isSignUp}
+                className={isSignUp ? 'auth-tab active' : 'auth-tab'}
+                onClick={() => switchMode('sign-up')}
+              >
+                Sign Up
+              </button>
+            )}
           </div>
 
           {serverError && <p className="form-error server-error" role="alert">{serverError}</p>}
@@ -169,7 +207,9 @@ export default function AuthView() {
 
             <div className={`auth-identifier-fields${isSignUp ? ' is-hidden' : ''}`} aria-hidden={isSignUp}>
               <div className="auth-identifier-fields-inner">
-                <label className="field-label" htmlFor="email-or-student-id">Email or Student ID</label>
+                <label className="field-label" htmlFor="email-or-student-id">
+                  {accountType === 'student' ? 'Email or Student ID' : 'Staff username, ID, or email'}
+                </label>
                 <div className="input-wrap">
                   <Mail size={18} aria-hidden="true" />
                   <input
@@ -177,7 +217,7 @@ export default function AuthView() {
                     name="emailOrStudentId"
                     type="text"
                     autoComplete="username"
-                    placeholder="Email address or student ID"
+                    placeholder={accountType === 'student' ? 'Email address or student ID' : 'Staff username, ID, or email'}
                     maxLength={120}
                     required={!isSignUp}
                     disabled={isSignUp}
@@ -205,10 +245,25 @@ export default function AuthView() {
                 onClick={() => setShowPassword((visible) => !visible)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 aria-pressed={showPassword}
+                title={showPassword ? 'Hide password' : 'Show password'}
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPassword
+                  ? <EyeOff size={18} aria-hidden="true" />
+                  : <Eye size={18} aria-hidden="true" />}
               </button>
             </div>
+
+            {!isSignUp && (
+              <label className="remember-me">
+                <input
+                  type="checkbox"
+                  name="rememberMe"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.target.checked)}
+                />
+                <span>Remember me on this device</span>
+              </label>
+            )}
 
             {error && <p className="form-error" role="alert">{error}</p>}
 
@@ -217,7 +272,11 @@ export default function AuthView() {
             </button>
           </form>
 
-          <p className="auth-footnote">For SLSU students, faculty, and staff</p>
+          <p className="auth-footnote">
+            {accountType === 'student'
+              ? 'For SLSU students. Student accounts can be created here.'
+              : 'For authorized SSC, administrator, and registrar accounts. Contact your campus administrator if you need access.'}
+          </p>
         </section>
       </div>
     </main>
