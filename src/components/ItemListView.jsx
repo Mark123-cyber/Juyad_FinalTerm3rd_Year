@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin, PackageOpen } from 'lucide-react'
+import { Building2, CalendarDays, MapPin, PackageOpen } from 'lucide-react'
 
 export default function ItemListView({ title, description, items, loading, error }) {
   return (
@@ -22,13 +22,22 @@ export default function ItemListView({ title, description, items, loading, error
                 <span className={`pill ${item.type === 'lost' ? 'warning' : 'success'}`}>
                   {item.type}
                 </span>
-                <span className="date-badge">
-                  <CalendarDays size={14} />
-                  {item.date}
+                <span className="item-list-meta">
+                  <span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>
+                    {item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}
+                  </span>
+                  <time className="date-badge" dateTime={item.date}>
+                    <CalendarDays size={14} aria-hidden="true" />
+                    {item.date}
+                  </time>
                 </span>
               </div>
               <h2>{item.title}</h2>
               <p className="description">{item.description}</p>
+              <p className="item-location">
+                <Building2 size={16} aria-hidden="true" />
+                {item.campus} campus
+              </p>
               <p className="item-location">
                 <MapPin size={16} aria-hidden="true" />
                 {item.location}

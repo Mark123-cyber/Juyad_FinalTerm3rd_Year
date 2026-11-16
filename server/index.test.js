@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +10,10 @@ process.env.DB_PATH = join(temporaryDirectory, 'test.sqlite')
 process.env.ADMIN_USERNAME = 'test-admin'
 process.env.ADMIN_PASSWORD = 'test-admin-password-12345'
 process.env.NODE_ENV = 'test'
+process.env.SMTP_HOST = ''
+process.env.SMTP_FROM = ''
+process.env.SMTP_USER = ''
+process.env.SMTP_PASSWORD = ''
 
 const { default: app, db } = await import('./index.js')
 const server = app.listen(0, '127.0.0.1')
@@ -29,6 +34,17 @@ async function request(path, { method = 'GET', body, cookie } = {}) {
     payload: response.status === 204 ? null : await response.json(),
     cookie: response.headers.getSetCookie()?.[0]?.split(';')[0],
   }
+}
+
+function addTestStudent(id, studentId, name, email, campus) {
+  db.prepare(`
+    INSERT INTO users (id, full_name, login, student_id, email, campus, role, password_hash, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'user', 'test-hash', ?)
+  `).run(id, name, email, studentId, email, campus, new Date().toISOString())
+  const token = randomBytes(32).toString('hex')
+  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+    .run(createHash('sha256').update(token).digest('hex'), id, Date.now() + 60 * 60 * 1000)
+  return `slsu_session=${token}`
 }
 
 after(async () => {
@@ -88,6 +104,21 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(studentUsingStaffLogin.response.status, 401)
 
+  const sameCampusStudentCookie = addTestStudent(
+    'test-same-campus-student',
+    'SLSU-2026-00124',
+    'Same Campus Student',
+    'same-campus@example.com',
+    'Sogod',
+  )
+  const differentCampusStudentCookie = addTestStudent(
+    'test-different-campus-student',
+    'SLSU-2026-00125',
+    'Different Campus Student',
+    'different-campus@example.com',
+    'Maasin',
+  )
+
   const duplicateStudentId = await request('/api/auth/signup', {
     method: 'POST',
     body: {
@@ -112,6 +143,8 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
 
   const deniedAdminPage = await request('/api/admin/users', { cookie: signup.cookie })
   assert.equal(deniedAdminPage.response.status, 403)
+  const deniedStudentNotifications = await request('/api/notifications')
+  assert.equal(deniedStudentNotifications.response.status, 401)
 
   const report = await request('/api/items', {
     method: 'POST',
@@ -125,6 +158,40 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(report.response.status, 201)
   assert.equal(report.payload.reporter, 'Sample Student')
+  assert.equal(report.payload.campus, 'Sogod')
+  assert.equal(report.payload.status, 'open')
+
+  const listedItems = await request('/api/items', { cookie: signup.cookie })
+  const listedReport = listedItems.payload.find((item) => item.id === report.payload.id)
+  assert.equal(listedReport.campus, 'Sogod')
+  assert.equal(listedReport.status, 'open')
+
+  const sameCampusNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(sameCampusNotifications.response.status, 200)
+  assert.equal(sameCampusNotifications.payload.unreadCount, 1)
+  assert.equal(sameCampusNotifications.payload.notifications[0].eventType, 'new_report')
+  assert.match(sameCampusNotifications.payload.notifications[0].message, /Water bottle/)
+
+  const differentCampusNotifications = await request('/api/notifications', { cookie: differentCampusStudentCookie })
+  assert.equal(differentCampusNotifications.response.status, 200)
+  assert.equal(differentCampusNotifications.payload.unreadCount, 0)
+
+  const deniedCrossCampusRead = await request(
+    `/api/notifications/${encodeURIComponent(sameCampusNotifications.payload.notifications[0].id)}/read`,
+    { method: 'PATCH', cookie: differentCampusStudentCookie },
+  )
+  assert.equal(deniedCrossCampusRead.response.status, 404)
+
+  const reporterNotifications = await request('/api/notifications', { cookie: signup.cookie })
+  assert.equal(reporterNotifications.payload.unreadCount, 0)
+
+  const markedNotification = await request(
+    `/api/notifications/${encodeURIComponent(sameCampusNotifications.payload.notifications[0].id)}/read`,
+    { method: 'PATCH', cookie: sameCampusStudentCookie },
+  )
+  assert.equal(markedNotification.response.status, 200)
+  const readNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(readNotifications.payload.unreadCount, 0)
 
   const invalidCampus = await request('/api/auth/signup', {
     method: 'POST',
@@ -143,6 +210,13 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(adminLogin.response.status, 200)
   assert.doesNotMatch(adminLogin.response.headers.getSetCookie()[0], /Expires=/i)
+
+  const deniedAdminNotifications = await request('/api/notifications', { cookie: adminLogin.cookie })
+  assert.equal(deniedAdminNotifications.response.status, 403)
+
+  const notificationSettings = await request('/api/admin/notification-settings', { cookie: adminLogin.cookie })
+  assert.equal(notificationSettings.response.status, 200)
+  assert.equal(notificationSettings.payload.emailNotificationsEnabled, false)
 
   const staffUsingStudentLogin = await request('/api/auth/login', {
     method: 'POST',
@@ -210,6 +284,104 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(adminReport.response.status, 200)
   assert.equal(adminReport.payload.title, 'Updated water bottle')
+  assert.equal(adminReport.payload.status, 'open')
+
+  const deniedStudentClaim = await request(`/api/admin/items/${encodeURIComponent(report.payload.id)}`, {
+    method: 'PATCH',
+    cookie: sameCampusStudentCookie,
+    body: {
+      title: 'Updated water bottle',
+      description: 'Updated description',
+      location: 'Main Library',
+      type: 'found',
+      reporter: 'Administrator',
+      date: report.payload.date,
+      status: 'claimed',
+    },
+  })
+  assert.equal(deniedStudentClaim.response.status, 403)
+
+  const claimedReport = await request(`/api/admin/items/${encodeURIComponent(report.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Updated water bottle',
+      description: 'Updated description',
+      location: 'Main Library',
+      type: 'found',
+      reporter: 'Administrator',
+      date: report.payload.date,
+      status: 'claimed',
+    },
+  })
+  assert.equal(claimedReport.response.status, 200)
+  assert.equal(claimedReport.payload.status, 'claimed')
+  assert.equal(claimedReport.payload.campus, 'Sogod')
+
+  const claimNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(claimNotifications.payload.unreadCount, 1)
+  assert.equal(claimNotifications.payload.notifications[0].eventType, 'claimed')
+  assert.equal(claimNotifications.payload.notifications[0].itemType, 'found')
+
+  const markAllRead = await request('/api/notifications/read-all', {
+    method: 'PATCH',
+    cookie: sameCampusStudentCookie,
+  })
+  assert.equal(markAllRead.response.status, 200)
+  const allReadNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(allReadNotifications.payload.unreadCount, 0)
+
+  const repeatedClaim = await request(`/api/admin/items/${encodeURIComponent(report.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Updated water bottle',
+      description: 'Updated description',
+      location: 'Main Library',
+      type: 'found',
+      reporter: 'Administrator',
+      date: report.payload.date,
+      status: 'claimed',
+    },
+  })
+  assert.equal(repeatedClaim.response.status, 200)
+  const noDuplicateClaimNotification = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(noDuplicateClaimNotification.payload.notifications.length, 2)
+
+  const reopenedReport = await request(`/api/admin/items/${encodeURIComponent(report.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Updated water bottle',
+      description: 'Updated description',
+      location: 'Main Library',
+      type: 'found',
+      reporter: 'Administrator',
+      date: report.payload.date,
+      status: 'open',
+    },
+  })
+  assert.equal(reopenedReport.response.status, 200)
+  const noReopenNotification = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(noReopenNotification.payload.notifications.length, 2)
+
+  const reclaimedReport = await request(`/api/admin/items/${encodeURIComponent(report.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Updated water bottle',
+      description: 'Updated description',
+      location: 'Main Library',
+      type: 'found',
+      reporter: 'Administrator',
+      date: report.payload.date,
+      status: 'claimed',
+    },
+  })
+  assert.equal(reclaimedReport.response.status, 200)
+  const reclaimNotification = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(reclaimNotification.payload.notifications.length, 3)
+  assert.equal(reclaimNotification.payload.unreadCount, 1)
 
   const logout = await request('/api/auth/logout', { method: 'POST', cookie: signup.cookie })
   assert.equal(logout.response.status, 204)

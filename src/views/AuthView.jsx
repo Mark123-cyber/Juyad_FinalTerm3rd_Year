@@ -182,14 +182,14 @@ export default function AuthView() {
                     placeholder="Your student ID"
                     minLength={3}
                     maxLength={32}
-                    pattern="[A-Za-z0-9][A-Za-z0-9-]{2,31}"
+                    pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-){2,31}"
                     required
                     disabled={!isSignUp}
                   />
                 </div>
                 <p className="field-hint">3–32 letters, numbers, or hyphens.</p>
 
-                <label className="field-label" htmlFor="signup-email">Email <span>(optional)</span></label>
+                <label className="field-label" htmlFor="signup-email">Email <span>(optional, used for email alerts)</span></label>
                 <div className="input-wrap">
                   <Mail size={18} aria-hidden="true" />
                   <input

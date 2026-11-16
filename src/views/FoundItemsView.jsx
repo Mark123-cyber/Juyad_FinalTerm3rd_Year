@@ -7,7 +7,7 @@ export default function FoundItemsView() {
   return (
     <ItemListView
       title="Found items"
-      description="Items found on campus and waiting to be reunited with their owners."
+      description="Items reported found across SLSU campuses. Check the follow-up status before contacting campus staff."
       items={items.filter((item) => item.type === 'found')}
       loading={loading}
       error={error}

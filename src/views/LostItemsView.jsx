@@ -7,7 +7,7 @@ export default function LostItemsView() {
   return (
     <ItemListView
       title="Lost items"
-      description="Items reported missing around the SLSU campuses."
+      description="Items reported missing across SLSU campuses, with the latest follow-up status."
       items={items.filter((item) => item.type === 'lost')}
       loading={loading}
       error={error}

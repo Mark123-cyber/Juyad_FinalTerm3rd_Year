@@ -14,9 +14,28 @@ The fixed admin username and password from `.env` are created or refreshed when 
 
 The SQLite database is created at `server/data/lost-and-found.sqlite` and is excluded from Git. Back up this file to preserve accounts and reports.
 
+## Student alerts and report follow-up
+
+Student dashboards show searchable campus reports and an in-app notification bell. New reports and staff-confirmed claim/resolution updates notify student accounts assigned to the report's campus; the student who submitted a new report does not receive a duplicate alert. Notification events are retained in the database and appear the next time a student signs in. The notification bell refreshes while the app is open.
+
+Email alerts are sent to campus student accounts with an email address when SMTP is configured. Add your SMTP provider's settings to the private `.env` file and restart the API:
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-smtp-username
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM="Lost and Found <lost-and-found@example.com>"
+```
+
+For port 465, set `SMTP_SECURE=true`. If your SMTP relay does not require authentication, omit `SMTP_USER` and `SMTP_PASSWORD`. Email delivery is disabled until `SMTP_HOST` and `SMTP_FROM` are configured; the administrator dashboard displays this status. Keep SMTP credentials private and never commit `.env`. Student email addresses are optional, so students without one still receive in-app notifications.
+
+Administrators should mark a report **Claimed / resolved** only after campus staff verifies that the item has been returned. That status change sends one claim update to students at that campus. Reopening a report does not send an alert; marking it claimed again after reopening sends a new update.
+
 ## Administrator tools
 
-Administrators can add, edit, and remove user accounts; assign Student IDs and optional email addresses; change user roles and reset passwords; edit or remove any lost/found report; and add/remove campus choices. The fixed admin account cannot be removed or have its login, role, or password changed from the dashboard. Removing a campus that is assigned to an account is blocked until those accounts are moved to another campus.
+Administrators can search and filter campus reports, mark verified returns as claimed/resolved, add/edit/remove user accounts, assign Student IDs and optional email addresses, change user roles and reset passwords, edit or remove any lost/found report, and add/remove campus choices. The fixed admin account cannot be removed or have its login, role, or password changed from the dashboard. Removing a campus that is assigned to an account is blocked until those accounts are moved to another campus.
 
 The initial campus choices are San Juan, Hinunangan, Sogod, Bontoc, and Maasin.
 

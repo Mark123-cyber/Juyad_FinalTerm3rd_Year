@@ -1,6 +1,7 @@
 import cookieParser from 'cookie-parser'
 import express from 'express'
 import { rateLimit } from 'express-rate-limit'
+import nodemailer from 'nodemailer'
 import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -14,9 +15,41 @@ const adminLogin = String(process.env.ADMIN_USERNAME || '').trim()
 const adminPassword = String(process.env.ADMIN_PASSWORD || '')
 const sessionLifetime = 7 * 24 * 60 * 60 * 1000
 const cookieName = 'slsu_session'
+const smtpHost = String(process.env.SMTP_HOST || '').trim()
+const smtpPort = Number(process.env.SMTP_PORT || 587)
+const smtpUser = String(process.env.SMTP_USER || '').trim()
+const smtpPassword = String(process.env.SMTP_PASSWORD || '')
+const smtpFrom = String(process.env.SMTP_FROM || '').trim()
+const smtpSecureSetting = String(process.env.SMTP_SECURE || '').trim().toLowerCase()
+const smtpSecure = smtpSecureSetting ? smtpSecureSetting === 'true' : smtpPort === 465
 
 if (!adminLogin || adminLogin.length > 120 || adminPassword.length < 12 || adminPassword.length > 128) {
   throw new Error('Configure an ADMIN_USERNAME of at most 120 characters and an ADMIN_PASSWORD of 12 to 128 characters in .env.')
+}
+if (!Number.isInteger(smtpPort) || smtpPort < 1 || smtpPort > 65535) {
+  throw new Error('SMTP_PORT must be a valid port number from 1 to 65535.')
+}
+if (smtpSecureSetting && smtpSecureSetting !== 'true' && smtpSecureSetting !== 'false') {
+  throw new Error('SMTP_SECURE must be either true or false.')
+}
+if (smtpHost && !smtpFrom || !smtpHost && (smtpFrom || smtpUser || smtpPassword)) {
+  throw new Error('Configure SMTP_HOST and SMTP_FROM together to enable email notifications.')
+}
+if (Boolean(smtpUser) !== Boolean(smtpPassword)) {
+  throw new Error('Configure both SMTP_USER and SMTP_PASSWORD, or leave both blank for an unauthenticated relay.')
+}
+
+const emailTransport = smtpHost
+  ? nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpSecure,
+    ...(smtpUser ? { auth: { user: smtpUser, pass: smtpPassword } } : {}),
+  })
+  : null
+
+if (!emailTransport) {
+  console.warn('Email notifications are disabled. Configure SMTP_HOST and SMTP_FROM in .env to enable them.')
 }
 
 mkdirSync(dirname(databasePath), { recursive: true })
@@ -46,18 +79,44 @@ db.exec(`
     type TEXT NOT NULL CHECK (type IN ('lost', 'found')),
     reporter TEXT NOT NULL,
     date TEXT NOT NULL,
-    created_by TEXT
+    created_by TEXT,
+    campus TEXT NOT NULL DEFAULT 'Maasin',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'claimed')),
+    claimed_at TEXT,
+    claimed_by TEXT
   );
   CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_id TEXT REFERENCES items(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN ('new_report', 'claimed')),
+    item_type TEXT NOT NULL CHECK (item_type IN ('lost', 'found')),
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS notifications_recipient_created
+    ON notifications (recipient_id, created_at DESC);
 `)
 
 const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(({ name }) => name))
 if (!userColumns.has('student_id')) db.exec('ALTER TABLE users ADD COLUMN student_id TEXT')
 if (!userColumns.has('email')) db.exec('ALTER TABLE users ADD COLUMN email TEXT')
+const itemColumns = new Set(db.prepare('PRAGMA table_info(items)').all().map(({ name }) => name))
+if (!itemColumns.has('campus')) db.exec("ALTER TABLE items ADD COLUMN campus TEXT NOT NULL DEFAULT 'Maasin'")
+if (!itemColumns.has('status')) db.exec("ALTER TABLE items ADD COLUMN status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'claimed'))")
+if (!itemColumns.has('claimed_at')) db.exec('ALTER TABLE items ADD COLUMN claimed_at TEXT')
+if (!itemColumns.has('claimed_by')) db.exec('ALTER TABLE items ADD COLUMN claimed_by TEXT')
+db.exec(`
+  UPDATE items
+  SET campus = COALESCE((SELECT campus FROM users WHERE users.id = items.created_by), campus)
+  WHERE created_by IS NOT NULL;
+`)
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS users_student_id_unique
   ON users (student_id COLLATE NOCASE)
@@ -162,7 +221,11 @@ const findIdentityConflict = (login, studentId, email, excludedId = null) => db.
     AND (? IS NULL OR id != ?)
   LIMIT 1
 `).get(login, studentId, email, excludedId, excludedId)
-const listItems = () => db.prepare('SELECT id, title, description, location, type, reporter, date FROM items ORDER BY date DESC, rowid DESC').all()
+const listItems = () => db.prepare(`
+  SELECT id, title, description, location, type, reporter, date, campus, status, claimed_at AS claimedAt
+  FROM items
+  ORDER BY date DESC, rowid DESC
+`).all()
 const cleanText = (value) => typeof value === 'string' ? value.trim() : ''
 const studentIdPattern = /^[A-Z0-9][A-Z0-9-]{2,31}$/
 
@@ -201,6 +264,75 @@ function requireUser(request, response, next) {
 function requireAdmin(request, response, next) {
   if (request.user?.role !== 'admin') return next(new HttpError(403, 'Administrator access is required.'))
   return next()
+}
+
+function requireStudent(request, response, next) {
+  if (request.user?.role !== 'user') return next(new HttpError(403, 'Student account access is required.'))
+  return next()
+}
+
+function withTransaction(callback) {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = callback()
+    db.exec('COMMIT')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+function createCampusNotifications(item, eventType, excludedUserId = null) {
+  const recipients = db.prepare(`
+    SELECT id, email FROM users
+    WHERE campus = ? COLLATE NOCASE
+      AND role = 'user'
+      AND (? IS NULL OR id != ?)
+  `).all(item.campus, excludedUserId, excludedUserId)
+  const createdAt = new Date().toISOString()
+  const message = eventType === 'new_report'
+    ? `New ${item.type} item reported: ${item.title}`
+    : `${item.type === 'lost' ? 'Lost item resolved' : 'Found item claimed'}: ${item.title}`
+  const insertNotification = db.prepare(`
+    INSERT INTO notifications (id, recipient_id, item_id, event_type, item_type, message, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  for (const recipient of recipients) {
+    insertNotification.run(
+      `notification-${randomUUID()}`,
+      recipient.id,
+      item.id,
+      eventType,
+      item.type,
+      message,
+      createdAt,
+    )
+  }
+
+  return recipients.filter(({ email }) => Boolean(email))
+}
+
+async function sendEmailNotifications(recipients, item, eventType) {
+  if (!emailTransport || recipients.length === 0) return
+  const subject = eventType === 'new_report'
+    ? `New ${item.type} item reported at ${item.campus}`
+    : `${item.type === 'lost' ? 'Lost item resolved' : 'Found item claimed'} at ${item.campus}`
+  const text = eventType === 'new_report'
+    ? `A new ${item.type} item report has been posted at the ${item.campus} campus.\n\nItem: ${item.title}\nLocation: ${item.location}\n\nSign in to the SLSU Lost and Found portal to view the report.`
+    : `Campus staff marked this ${item.type} item as claimed/resolved at the ${item.campus} campus.\n\nItem: ${item.title}\nLocation: ${item.location}\n\nSign in to the SLSU Lost and Found portal to view the report.`
+  const results = await Promise.allSettled(recipients.map(({ email }) => emailTransport.sendMail({
+    from: smtpFrom,
+    to: email,
+    subject,
+    text,
+  })))
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('Could not deliver a lost-and-found email notification.', result.reason)
+    }
+  }
 }
 
 function createSession(user, response, rememberMe = false) {
@@ -308,6 +440,42 @@ app.post('/api/auth/logout', (request, response) => {
   response.status(204).end()
 })
 
+app.get('/api/notifications', requireUser, requireStudent, (request, response) => {
+  const notifications = db.prepare(`
+    SELECT id, item_id AS itemId, event_type AS eventType, item_type AS itemType,
+      message, created_at AS createdAt, read_at AS readAt
+    FROM notifications
+    WHERE recipient_id = ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).all(request.user.id)
+  const unreadCount = db.prepare(`
+    SELECT COUNT(*) AS count FROM notifications
+    WHERE recipient_id = ? AND read_at IS NULL
+  `).get(request.user.id).count
+  response.json({ notifications, unreadCount })
+})
+
+app.patch('/api/notifications/read-all', requireUser, requireStudent, (request, response) => {
+  const readAt = new Date().toISOString()
+  const result = db.prepare(`
+    UPDATE notifications SET read_at = ?
+    WHERE recipient_id = ? AND read_at IS NULL
+  `).run(readAt, request.user.id)
+  response.json({ updated: result.changes, readAt })
+})
+
+app.patch('/api/notifications/:id/read', requireUser, requireStudent, (request, response) => {
+  const readAt = new Date().toISOString()
+  const result = db.prepare(`
+    UPDATE notifications SET read_at = COALESCE(read_at, ?)
+    WHERE id = ? AND recipient_id = ?
+  `).run(readAt, request.params.id, request.user.id)
+  if (result.changes === 0) throw new HttpError(404, 'Notification not found.')
+  const notification = db.prepare('SELECT read_at AS readAt FROM notifications WHERE id = ?').get(request.params.id)
+  response.json(notification)
+})
+
 app.get('/api/items', requireUser, (request, response) => {
   response.json(listItems())
 })
@@ -321,22 +489,34 @@ app.post('/api/items', requireUser, (request, response) => {
     type: cleanText(request.body.type),
     reporter: request.user.full_name,
     date: new Date().toISOString().slice(0, 10),
+    campus: request.user.campus,
+    status: 'open',
   }
   requireFields(item, ['title', 'description', 'location', 'type'])
   if (item.type !== 'lost' && item.type !== 'found') throw new HttpError(400, 'Report type must be lost or found.')
   if ([item.title, item.description, item.location].some((value) => value.length > 2000)) {
     throw new HttpError(400, 'Report fields must be 2,000 characters or fewer.')
   }
-  db.prepare(`
-    INSERT INTO items (id, title, description, location, type, reporter, date, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(item.id, item.title, item.description, item.location, item.type, item.reporter, item.date, request.user.id)
+  let emailRecipients = []
+  withTransaction(() => {
+    db.prepare(`
+      INSERT INTO items (id, title, description, location, type, reporter, date, created_by, campus, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(item.id, item.title, item.description, item.location, item.type, item.reporter, item.date, request.user.id, item.campus, item.status)
+    emailRecipients = createCampusNotifications(item, 'new_report', request.user.id)
+  })
+  void sendEmailNotifications(emailRecipients, item, 'new_report')
+    .catch((error) => console.error('Could not send new-report email notifications.', error))
   response.status(201).json(item)
 })
 
 app.get('/api/admin/users', requireUser, requireAdmin, (request, response) => {
   const users = db.prepare('SELECT * FROM users ORDER BY created_at DESC').all()
   response.json(users.map((user) => ({ ...publicUser(user), isFixedAdmin: isPrimaryAdmin(user) })))
+})
+
+app.get('/api/admin/notification-settings', requireUser, requireAdmin, (request, response) => {
+  response.json({ emailNotificationsEnabled: Boolean(emailTransport) })
 })
 
 app.post('/api/admin/users', requireUser, requireAdmin, (request, response) => {
@@ -432,11 +612,46 @@ app.patch('/api/admin/items/:id', requireUser, requireAdmin, (request, response)
   }
   requireFields(item, ['title', 'description', 'location', 'type', 'reporter', 'date'])
   if (item.type !== 'lost' && item.type !== 'found') throw new HttpError(400, 'Report type must be lost or found.')
-  db.prepare(`
-    UPDATE items SET title = ?, description = ?, location = ?, type = ?, reporter = ?, date = ?
-    WHERE id = ?
-  `).run(item.title, item.description, item.location, item.type, item.reporter, item.date, existing.id)
-  response.json({ id: existing.id, ...item })
+  const status = request.body.status === undefined ? existing.status : cleanText(request.body.status)
+  if (status !== 'open' && status !== 'claimed') throw new HttpError(400, 'Choose Open or Claimed / resolved.')
+  const claimedAt = status === 'claimed'
+    ? existing.status === 'claimed' ? existing.claimed_at : new Date().toISOString()
+    : null
+  const claimedBy = status === 'claimed'
+    ? existing.status === 'claimed' ? existing.claimed_by : request.user.id
+    : null
+  const updatedItem = {
+    id: existing.id,
+    ...item,
+    campus: existing.campus,
+    status,
+    claimedAt,
+  }
+  let emailRecipients = []
+  withTransaction(() => {
+    db.prepare(`
+      UPDATE items SET title = ?, description = ?, location = ?, type = ?, reporter = ?, date = ?,
+        status = ?, claimed_at = ?, claimed_by = ?
+      WHERE id = ?
+    `).run(
+      item.title,
+      item.description,
+      item.location,
+      item.type,
+      item.reporter,
+      item.date,
+      status,
+      claimedAt,
+      claimedBy,
+      existing.id,
+    )
+    if (status === 'claimed' && existing.status !== 'claimed') {
+      emailRecipients = createCampusNotifications(updatedItem, 'claimed')
+    }
+  })
+  void sendEmailNotifications(emailRecipients, updatedItem, 'claimed')
+    .catch((error) => console.error('Could not send claim email notifications.', error))
+  response.json(updatedItem)
 })
 
 app.delete('/api/admin/items/:id', requireUser, requireAdmin, (request, response) => {

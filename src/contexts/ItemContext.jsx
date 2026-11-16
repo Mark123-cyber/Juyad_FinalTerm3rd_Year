@@ -36,6 +36,29 @@ export function ItemProvider({ children }) {
   const loading = Boolean(userId) && (!isCurrentUserData || snapshot.loading)
   const error = isCurrentUserData ? snapshot.error : ''
 
+  const refreshItems = useCallback(async () => {
+    if (!userId) return
+    try {
+      const currentItems = await apiRequest('/api/items')
+      setSnapshot((previous) => ({
+        ...previous,
+        userId,
+        items: currentItems,
+        loading: false,
+        error: '',
+      }))
+    } catch (loadError) {
+      console.error('Could not refresh item reports.', loadError)
+      setSnapshot((previous) => ({
+        ...previous,
+        userId,
+        loading: false,
+        error: loadError.message,
+      }))
+      throw loadError
+    }
+  }, [userId])
+
   const addItem = useCallback(async (item) => {
     const savedItem = await apiRequest('/api/items', {
       method: 'POST',
@@ -73,10 +96,11 @@ export function ItemProvider({ children }) {
     items,
     loading,
     error,
+    refreshItems,
     addItem,
     updateItem,
     deleteItem,
-  }), [items, loading, error, addItem, updateItem, deleteItem])
+  }), [items, loading, error, refreshItems, addItem, updateItem, deleteItem])
 
   return <ItemContext.Provider value={value}>{children}</ItemContext.Provider>
 }
