@@ -1594,6 +1594,31 @@ tbody tr:last-child td {
   clip-path: inset(50%);
 }
 
+@media (max-width: 1100px) {
+  .five-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1040px) {
+  .navbar-inner {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 10px 0;
+  }
+
+  .main-nav {
+    order: 3;
+    flex: 1 0 100%;
+    justify-content: center;
+    overflow-x: auto;
+  }
+
+  .account-name {
+    max-width: 100px;
+  }
+}
+
 @media (max-width: 760px) {
   .auth-page {
     padding: 20px;
@@ -1608,17 +1633,9 @@ tbody tr:last-child td {
     padding: 34px;
   }
 
-  .navbar-inner {
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    padding: 10px 0;
-  }
-
   .main-nav {
-    order: 3;
     width: 100%;
     justify-content: space-between;
-    overflow-x: auto;
   }
 
   .nav-link {
@@ -1641,7 +1658,11 @@ tbody tr:last-child td {
   }
 
   .three-columns {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-stats .stat-card:last-child {
+    grid-column: 1 / -1;
   }
 
   .four-columns {
@@ -1729,6 +1750,33 @@ tbody tr:last-child td {
     padding: 16px;
   }
 
+  .admin-overview-stats {
+    gap: 10px;
+  }
+
+  .admin-overview-stats .stat-card {
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .admin-overview-stats .stat-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .admin-overview-stats .stat-card > div:not(.stat-icon) {
+    min-width: 0;
+  }
+
+  .admin-overview-stats .label {
+    font-size: 0.68rem;
+  }
+
+  .admin-overview-stats .stat-card strong {
+    font-size: 1.35rem;
+  }
+
   .admin-report-filters {
     align-items: stretch;
     flex-direction: column;
@@ -1767,6 +1815,16 @@ tbody tr:last-child td {
 
   .campus-add-form input {
     max-width: none;
+  }
+}
+
+@media (max-width: 360px) {
+  .dashboard-stats.three-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-stats .stat-card:last-child {
+    grid-column: auto;
   }
 }
 
