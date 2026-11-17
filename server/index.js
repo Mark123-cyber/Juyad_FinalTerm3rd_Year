@@ -367,35 +367,8 @@ app.get('/api/campuses', (request, response) => {
   response.json(db.prepare('SELECT name FROM campuses ORDER BY rowid').all().map(({ name }) => name))
 })
 
-app.post('/api/auth/signup', loginLimiter, (request, response) => {
-  const fullName = cleanText(request.body.fullName)
-  const studentId = parseStudentId(request.body.studentId)
-  const email = parseEmail(request.body.email)
-  const login = email || studentId
-  const campus = cleanText(request.body.campus)
-  const password = typeof request.body.password === 'string' ? request.body.password : ''
-  requireFields({ fullName, login, campus, password }, ['fullName', 'login', 'campus', 'password'])
-  if (fullName.length > 120) throw new HttpError(400, 'Name must be 120 characters or fewer.')
-  if (password.length < 8 || password.length > 128) throw new HttpError(400, 'Password must be between 8 and 128 characters.')
-  if (!campusExists(campus)) throw new HttpError(400, 'Choose one of the available campuses.')
-  if (findIdentityConflict(login, studentId, email)) throw new HttpError(409, 'An account with that Student ID or email already exists.')
-
-  const user = {
-    id: `user-${randomUUID()}`,
-    full_name: fullName,
-    login,
-    student_id: studentId,
-    email,
-    campus,
-    role: 'user',
-    created_at: new Date().toISOString(),
-  }
-  db.prepare(`
-    INSERT INTO users (id, full_name, login, student_id, email, campus, role, password_hash, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'user', ?, ?)
-  `).run(user.id, user.full_name, user.login, user.student_id, user.email, user.campus, hashPassword(password), user.created_at)
-  createSession(user, response, true)
-  response.status(201).json({ user: publicUser(user) })
+app.post('/api/auth/signup', () => {
+  throw new HttpError(403, 'Student accounts must be created by campus staff.')
 })
 
 app.post('/api/auth/login', loginLimiter, (request, response) => {

@@ -60,7 +60,14 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   const blockedItems = await request('/api/items')
   assert.equal(blockedItems.response.status, 401)
 
-  const signup = await request('/api/auth/signup', {
+  const adminLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { emailOrStudentId: 'test-admin', password: 'test-admin-password-12345', accountType: 'staff' },
+  })
+  assert.equal(adminLogin.response.status, 200)
+  assert.doesNotMatch(adminLogin.response.headers.getSetCookie()[0], /Expires=/i)
+
+  const blockedStudentSignup = await request('/api/auth/signup', {
     method: 'POST',
     body: {
       fullName: 'Sample Student',
@@ -70,11 +77,25 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
       password: 'student-password-123',
     },
   })
-  assert.equal(signup.response.status, 201)
-  assert.equal(signup.payload.user.role, 'user')
-  assert.equal(signup.payload.user.studentId, 'SLSU-2026-00123')
-  assert.equal(signup.payload.user.email, 'sample.student@example.com')
-  assert.equal('password' in signup.payload.user, false)
+  assert.equal(blockedStudentSignup.response.status, 403)
+
+  const adminCreatedStudent = await request('/api/admin/users', {
+    method: 'POST',
+    cookie: adminLogin.cookie,
+    body: {
+      fullName: 'Sample Student',
+      studentId: 'SLSU-2026-00123',
+      email: 'sample.student@example.com',
+      campus: 'Sogod',
+      role: 'user',
+      password: 'student-password-123',
+    },
+  })
+  assert.equal(adminCreatedStudent.response.status, 201)
+  assert.equal(adminCreatedStudent.payload.role, 'user')
+  assert.equal(adminCreatedStudent.payload.studentId, 'SLSU-2026-00123')
+  assert.equal(adminCreatedStudent.payload.email, 'sample.student@example.com')
+  assert.equal('password' in adminCreatedStudent.payload, false)
 
   const studentIdLogin = await request('/api/auth/login', {
     method: 'POST',
@@ -119,36 +140,14 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
     'Maasin',
   )
 
-  const duplicateStudentId = await request('/api/auth/signup', {
-    method: 'POST',
-    body: {
-      fullName: 'Duplicate Student',
-      studentId: 'slsu-2026-00123',
-      campus: 'Sogod',
-      password: 'another-password',
-    },
-  })
-  assert.equal(duplicateStudentId.response.status, 409)
-
-  const invalidStudentId = await request('/api/auth/signup', {
-    method: 'POST',
-    body: {
-      fullName: 'Invalid Student ID',
-      studentId: 'ID WITH SPACES',
-      campus: 'Sogod',
-      password: 'another-password',
-    },
-  })
-  assert.equal(invalidStudentId.response.status, 400)
-
-  const deniedAdminPage = await request('/api/admin/users', { cookie: signup.cookie })
+  const deniedAdminPage = await request('/api/admin/users', { cookie: studentIdLogin.cookie })
   assert.equal(deniedAdminPage.response.status, 403)
   const deniedStudentNotifications = await request('/api/notifications')
   assert.equal(deniedStudentNotifications.response.status, 401)
 
   const report = await request('/api/items', {
     method: 'POST',
-    cookie: signup.cookie,
+    cookie: studentIdLogin.cookie,
     body: {
       title: 'Water bottle',
       description: 'Blue metal bottle',
@@ -161,7 +160,7 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   assert.equal(report.payload.campus, 'Sogod')
   assert.equal(report.payload.status, 'open')
 
-  const listedItems = await request('/api/items', { cookie: signup.cookie })
+  const listedItems = await request('/api/items', { cookie: studentIdLogin.cookie })
   const listedReport = listedItems.payload.find((item) => item.id === report.payload.id)
   assert.equal(listedReport.campus, 'Sogod')
   assert.equal(listedReport.status, 'open')
@@ -182,7 +181,7 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   )
   assert.equal(deniedCrossCampusRead.response.status, 404)
 
-  const reporterNotifications = await request('/api/notifications', { cookie: signup.cookie })
+  const reporterNotifications = await request('/api/notifications', { cookie: studentIdLogin.cookie })
   assert.equal(reporterNotifications.payload.unreadCount, 0)
 
   const markedNotification = await request(
@@ -192,24 +191,6 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   assert.equal(markedNotification.response.status, 200)
   const readNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
   assert.equal(readNotifications.payload.unreadCount, 0)
-
-  const invalidCampus = await request('/api/auth/signup', {
-    method: 'POST',
-    body: {
-      fullName: 'Invalid Campus',
-      studentId: 'other-123',
-      campus: 'Not a campus',
-      password: 'another-password',
-    },
-  })
-  assert.equal(invalidCampus.response.status, 400)
-
-  const adminLogin = await request('/api/auth/login', {
-    method: 'POST',
-    body: { emailOrStudentId: 'test-admin', password: 'test-admin-password-12345', accountType: 'staff' },
-  })
-  assert.equal(adminLogin.response.status, 200)
-  assert.doesNotMatch(adminLogin.response.headers.getSetCookie()[0], /Expires=/i)
 
   const deniedAdminNotifications = await request('/api/notifications', { cookie: adminLogin.cookie })
   assert.equal(deniedAdminNotifications.response.status, 403)
@@ -385,7 +366,7 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
 
   const studentFoundReport = await request('/api/items', {
     method: 'POST',
-    cookie: signup.cookie,
+    cookie: studentIdLogin.cookie,
     body: {
       title: 'Found keys',
       description: 'Keys found near the library',
@@ -424,8 +405,8 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   assert.equal(privateStaffReport.response.status, 201)
   assert.equal(privateStaffReport.payload.reporter, 'Anonymous (reported to staff)')
 
-  const logout = await request('/api/auth/logout', { method: 'POST', cookie: signup.cookie })
+  const logout = await request('/api/auth/logout', { method: 'POST', cookie: studentIdLogin.cookie })
   assert.equal(logout.response.status, 204)
-  const expiredAccess = await request('/api/items', { cookie: signup.cookie })
+  const expiredAccess = await request('/api/items', { cookie: studentIdLogin.cookie })
   assert.equal(expiredAccess.response.status, 401)
 })

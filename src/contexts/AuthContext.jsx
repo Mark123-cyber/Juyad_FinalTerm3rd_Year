@@ -38,16 +38,6 @@ export function AuthProvider({ children }) {
     return result.user
   }
 
-  const signUp = async (account) => {
-    const result = await apiRequest('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(account),
-    })
-    setError('')
-    setUser(result.user)
-    return result.user
-  }
-
   const signOut = async () => {
     await apiRequest('/api/auth/logout', { method: 'POST' })
     setError('')
@@ -59,7 +49,6 @@ export function AuthProvider({ children }) {
     loading,
     error,
     signIn,
-    signUp,
     signOut,
   }), [user, loading, error])
 

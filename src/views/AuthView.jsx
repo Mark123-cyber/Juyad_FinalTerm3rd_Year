@@ -1,76 +1,39 @@
-import { useEffect, useState } from 'react'
-import { BellRing, Eye, EyeOff, LockKeyhole, Mail, MapPin, PackageSearch, ShieldCheck, UserRound } from 'lucide-react'
+import { useState } from 'react'
+import { BellRing, Eye, EyeOff, LockKeyhole, Mail, MapPin, PackageSearch, ShieldCheck } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { apiRequest } from '../lib/api'
 
 export default function AuthView() {
   const navigate = useNavigate()
-  const { signIn, signUp, error: serverError } = useAuth()
-  const [mode, setMode] = useState('sign-in')
+  const { signIn, error: serverError } = useAuth()
   const [accountType, setAccountType] = useState('student')
   const [showPassword, setShowPassword] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
   const [error, setError] = useState('')
-  const [campuses, setCampuses] = useState([])
-  const [campusError, setCampusError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const isSignUp = mode === 'sign-up'
-
-  useEffect(() => {
-    let active = true
-    apiRequest('/api/campuses')
-      .then((availableCampuses) => {
-        if (active) setCampuses(availableCampuses)
-      })
-      .catch((loadError) => {
-        if (active) setCampusError(loadError.message)
-      })
-    return () => { active = false }
-  }, [])
 
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
-    setSubmitting(true)
 
     const formData = new FormData(event.currentTarget)
     const emailOrStudentId = String(formData.get('emailOrStudentId') || '').trim()
     const password = String(formData.get('password') || '')
     const shouldRemember = formData.get('rememberMe') === 'on'
-    const fullName = String(formData.get('fullName') || '').trim()
-    const studentId = String(formData.get('studentId') || '').trim()
-    const email = String(formData.get('email') || '').trim()
-    const campus = String(formData.get('campus') || '').trim()
 
-    if (!emailOrStudentId && !isSignUp || !password || (isSignUp && (!fullName || !studentId || !campus))) {
+    if (!emailOrStudentId || !password) {
       setError('Please complete all required fields.')
-      setSubmitting(false)
-      return
-    }
-
-    if (isSignUp && !/^[A-Za-z0-9][A-Za-z0-9-]{2,31}$/.test(studentId)) {
-      setError('Student ID must be 3 to 32 characters and contain only letters, numbers, or hyphens.')
-      setSubmitting(false)
-      return
-    }
-
-    if (isSignUp && email && (email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-      setError('Enter a valid email address of 120 characters or fewer.')
-      setSubmitting(false)
       return
     }
 
     if (password.length < 8) {
       setError('Password must be at least 8 characters.')
-      setSubmitting(false)
       return
     }
 
+    setSubmitting(true)
     try {
-      const user = isSignUp
-        ? await signUp({ fullName, campus, studentId, email, password })
-        : await signIn(emailOrStudentId, password, accountType, shouldRemember)
+      const user = await signIn(emailOrStudentId, password, accountType, shouldRemember)
       navigate(user.role === 'admin' ? '/admin' : '/dashboard', { replace: true })
     } catch (submitError) {
       setError(submitError.message)
@@ -79,15 +42,8 @@ export default function AuthView() {
     }
   }
 
-  const switchMode = (nextMode) => {
-    setMode(nextMode)
-    setError('')
-    setShowPassword(false)
-  }
-
   const switchAccountType = (nextType) => {
     setAccountType(nextType)
-    if (nextType === 'staff') setMode('sign-in')
     setError('')
     setShowPassword(false)
   }
@@ -143,8 +99,8 @@ export default function AuthView() {
           <div className="auth-card">
             <header className="auth-header">
               <p className="auth-university">STUDENT &amp; STAFF ACCESS</p>
-              <h1 key={`${mode}-${accountType}`} id="auth-title" className="auth-title-enter">{isSignUp ? 'Create your account' : 'Welcome back'}</h1>
-              <p className="auth-intro">{isSignUp ? 'Join your campus lost and found community.' : 'Sign in to continue to the campus portal.'}</p>
+              <h1 id="auth-title" className="auth-title-enter">Welcome back</h1>
+              <p className="auth-intro">Sign in to continue to the campus portal.</p>
             </header>
 
             <fieldset className="auth-account-type">
@@ -173,102 +129,22 @@ export default function AuthView() {
               </div>
             </fieldset>
 
-            <div className={`auth-tabs${isSignUp ? ' is-sign-up' : ''}${accountType === 'staff' ? ' is-staff' : ''}`} role="tablist" aria-label="Account access">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={!isSignUp}
-                className={!isSignUp ? 'auth-tab active' : 'auth-tab'}
-                onClick={() => switchMode('sign-in')}
-              >
-                Sign In
-              </button>
-              {accountType === 'student' && (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={isSignUp}
-                  className={isSignUp ? 'auth-tab active' : 'auth-tab'}
-                  onClick={() => switchMode('sign-up')}
-                >
-                  Sign Up
-                </button>
-              )}
-            </div>
-
             {serverError && <p className="form-error server-error" role="alert">{serverError}</p>}
-            <form className={`auth-form${isSignUp ? ' signup' : ''}`} onSubmit={handleSubmit} noValidate>
-              <div className="auth-signup-fields" aria-hidden={!isSignUp}>
-                <div className="auth-signup-fields-inner">
-                  <label className="field-label" htmlFor="full-name">Full Name</label>
-                  <div className="input-wrap">
-                    <UserRound size={18} aria-hidden="true" />
-                    <input id="full-name" name="fullName" type="text" autoComplete="name" placeholder="Your full name" required disabled={!isSignUp} />
-                  </div>
-
-                  <label className="field-label" htmlFor="campus">Campus</label>
-                  <div className="input-wrap">
-                    <MapPin size={18} aria-hidden="true" />
-                    <select id="campus" name="campus" defaultValue="" required disabled={!isSignUp}>
-                      <option value="" disabled>{campuses.length ? 'Select your campus' : 'Loading campuses…'}</option>
-                      {campuses.map((campus) => <option key={campus} value={campus}>{campus}</option>)}
-                    </select>
-                  </div>
-                  {campusError && <p className="form-error" role="alert">{campusError}</p>}
-
-                  <label className="field-label" htmlFor="student-id">Student ID</label>
-                  <div className="input-wrap">
-                    <UserRound size={18} aria-hidden="true" />
-                    <input
-                      id="student-id"
-                      name="studentId"
-                      type="text"
-                      autoComplete="off"
-                      placeholder="Your student ID"
-                      minLength={3}
-                      maxLength={32}
-                      pattern="[A-Za-z0-9](?:[A-Za-z0-9]|-){2,31}"
-                      required
-                      disabled={!isSignUp}
-                    />
-                  </div>
-                  <p className="field-hint">3–32 letters, numbers, or hyphens.</p>
-
-                  <label className="field-label" htmlFor="signup-email">Email <span>(optional, used for email alerts)</span></label>
-                  <div className="input-wrap">
-                    <Mail size={18} aria-hidden="true" />
-                    <input
-                      id="signup-email"
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="Email address"
-                      maxLength={120}
-                      disabled={!isSignUp}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className={`auth-identifier-fields${isSignUp ? ' is-hidden' : ''}`} aria-hidden={isSignUp}>
-                <div className="auth-identifier-fields-inner">
-                  <label className="field-label" htmlFor="email-or-student-id">
-                    {accountType === 'student' ? 'Email or Student ID' : 'Staff username, ID, or email'}
-                  </label>
-                  <div className="input-wrap">
-                    <Mail size={18} aria-hidden="true" />
-                    <input
-                      id="email-or-student-id"
-                      name="emailOrStudentId"
-                      type="text"
-                      autoComplete="username"
-                      placeholder={accountType === 'student' ? 'Email address or student ID' : 'Staff username, ID, or email'}
-                      maxLength={120}
-                      required={!isSignUp}
-                      disabled={isSignUp}
-                    />
-                  </div>
-                </div>
+            <form className="auth-form" onSubmit={handleSubmit} noValidate>
+              <label className="field-label" htmlFor="email-or-student-id">
+                {accountType === 'student' ? 'Email or Student ID' : 'Staff username, ID, or email'}
+              </label>
+              <div className="input-wrap">
+                <Mail size={18} aria-hidden="true" />
+                <input
+                  id="email-or-student-id"
+                  name="emailOrStudentId"
+                  type="text"
+                  autoComplete="username"
+                  placeholder={accountType === 'student' ? 'Email address or student ID' : 'Staff username, ID, or email'}
+                  maxLength={120}
+                  required
+                />
               </div>
 
               <label className="field-label" htmlFor="password">Password</label>
@@ -278,8 +154,8 @@ export default function AuthView() {
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                  placeholder="At least 8 characters"
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
                   minLength={8}
                   maxLength={128}
                   required
@@ -298,28 +174,26 @@ export default function AuthView() {
                 </button>
               </div>
 
-              {!isSignUp && (
-                <label className="remember-me">
-                  <input
-                    type="checkbox"
-                    name="rememberMe"
-                    checked={rememberMe}
-                    onChange={(event) => setRememberMe(event.target.checked)}
-                  />
-                  <span>Remember me on this device</span>
-                </label>
-              )}
+              <label className="remember-me">
+                <input
+                  type="checkbox"
+                  name="rememberMe"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.target.checked)}
+                />
+                <span>Remember me on this device</span>
+              </label>
 
               {error && <p className="form-error" role="alert">{error}</p>}
 
-              <button type="submit" className="primary-btn auth-submit" disabled={submitting || (isSignUp && campuses.length === 0)}>
-                {submitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
+              <button type="submit" className="primary-btn auth-submit" disabled={submitting}>
+                {submitting ? 'Please wait…' : 'Sign in'}
               </button>
             </form>
 
             <p className="auth-footnote">
               {accountType === 'student'
-                ? 'For SLSU students. Student accounts can be created here.'
+                ? 'Student accounts are created by campus staff. Contact your campus administrator for access.'
                 : 'For authorized SSC, administrator, and registrar accounts. Contact your campus administrator if you need access.'}
             </p>
           </div>
