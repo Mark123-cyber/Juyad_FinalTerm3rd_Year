@@ -101,6 +101,10 @@ export default function ReportItemView() {
           </select>
         </label>
 
+        {!isStaff && form.type === 'found' && (
+          <p className="field-hint">Staff will review this found-item report before it appears to other students.</p>
+        )}
+
         {isStaff && (
           <label>
             Person reporting (optional)

@@ -1,15 +1,20 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { Bell, LogOut, LayoutDashboard, Search, BellRing, PackageOpen, ShieldCheck } from 'lucide-react'
+import { Bell, LogOut, LayoutDashboard, Search, BellRing, PackageOpen, ShieldCheck, ClipboardCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useItems } from '../contexts/ItemContext'
 import { apiRequest } from '../lib/api'
 
-const USER_NAV_ITEMS = [
+const COMMON_NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/lost', label: 'Lost Items', icon: Search },
   { to: '/found', label: 'Found Items', icon: PackageOpen },
   { to: '/report', label: 'Report Item', icon: BellRing },
+]
+
+const STUDENT_NAV_ITEMS = [
+  ...COMMON_NAV_ITEMS,
+  { to: '/claims', label: 'My Claims', icon: ClipboardCheck },
 ]
 
 export default function Navbar() {
@@ -24,8 +29,8 @@ export default function Navbar() {
   const isStudent = user?.role === 'user'
   const unreadCount = unreadNotificationCount
   const navItems = user?.role === 'admin'
-    ? [...USER_NAV_ITEMS, { to: '/admin', label: 'Admin', icon: ShieldCheck }]
-    : USER_NAV_ITEMS
+    ? [...COMMON_NAV_ITEMS, { to: '/admin', label: 'Admin', icon: ShieldCheck }]
+    : STUDENT_NAV_ITEMS
 
   useEffect(() => {
     if (!isStudent) return undefined

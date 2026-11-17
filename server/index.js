@@ -82,6 +82,7 @@ db.exec(`
     created_by TEXT,
     campus TEXT NOT NULL DEFAULT 'Maasin',
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'claimed')),
+    review_status TEXT NOT NULL DEFAULT 'approved' CHECK (review_status IN ('pending', 'approved', 'rejected')),
     claimed_at TEXT,
     claimed_by TEXT
   );
@@ -100,8 +101,25 @@ db.exec(`
     created_at TEXT NOT NULL,
     read_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS claims (
+    id TEXT PRIMARY KEY,
+    item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+    requester_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    proof TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT REFERENCES users(id) ON DELETE SET NULL
+  );
   CREATE INDEX IF NOT EXISTS notifications_recipient_created
     ON notifications (recipient_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS claims_item_status_created
+    ON claims (item_id, status, created_at DESC);
+  CREATE INDEX IF NOT EXISTS claims_requester_created
+    ON claims (requester_id, created_at DESC);
+  CREATE UNIQUE INDEX IF NOT EXISTS claims_one_pending_per_requester
+    ON claims (item_id, requester_id)
+    WHERE status = 'pending';
 `)
 
 const userColumns = new Set(db.prepare('PRAGMA table_info(users)').all().map(({ name }) => name))
@@ -110,6 +128,9 @@ if (!userColumns.has('email')) db.exec('ALTER TABLE users ADD COLUMN email TEXT'
 const itemColumns = new Set(db.prepare('PRAGMA table_info(items)').all().map(({ name }) => name))
 if (!itemColumns.has('campus')) db.exec("ALTER TABLE items ADD COLUMN campus TEXT NOT NULL DEFAULT 'Maasin'")
 if (!itemColumns.has('status')) db.exec("ALTER TABLE items ADD COLUMN status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'claimed'))")
+if (!itemColumns.has('review_status')) {
+  db.exec("ALTER TABLE items ADD COLUMN review_status TEXT NOT NULL DEFAULT 'approved' CHECK (review_status IN ('pending', 'approved', 'rejected'))")
+}
 if (!itemColumns.has('claimed_at')) db.exec('ALTER TABLE items ADD COLUMN claimed_at TEXT')
 if (!itemColumns.has('claimed_by')) db.exec('ALTER TABLE items ADD COLUMN claimed_by TEXT')
 db.exec(`
@@ -221,11 +242,18 @@ const findIdentityConflict = (login, studentId, email, excludedId = null) => db.
     AND (? IS NULL OR id != ?)
   LIMIT 1
 `).get(login, studentId, email, excludedId, excludedId)
-const listItems = () => db.prepare(`
-  SELECT id, title, description, location, type, reporter, date, campus, status, claimed_at AS claimedAt
+const listItems = ({ includeUnreviewed = false, reporterId = null } = {}) => db.prepare(`
+  SELECT id, title, description, location, type, reporter, date, campus, status,
+    review_status AS reviewStatus, claimed_at AS claimedAt,
+    CASE
+      WHEN ? IS NOT NULL AND type = 'found' AND status = 'open'
+        AND review_status = 'approved' AND (created_by IS NULL OR created_by != ?)
+      THEN 1 ELSE 0
+    END AS canClaim
   FROM items
+  WHERE (? = 1 OR review_status = 'approved' OR created_by = ?)
   ORDER BY date DESC, rowid DESC
-`).all()
+`).all(reporterId, reporterId, includeUnreviewed ? 1 : 0, reporterId)
 const cleanText = (value) => typeof value === 'string' ? value.trim() : ''
 const studentIdPattern = /^[A-Z0-9][A-Z0-9-]{2,31}$/
 
@@ -450,7 +478,10 @@ app.patch('/api/notifications/:id/read', requireUser, requireStudent, (request, 
 })
 
 app.get('/api/items', requireUser, (request, response) => {
-  response.json(listItems())
+  response.json(listItems({
+    includeUnreviewed: request.user.role === 'admin',
+    reporterId: request.user.role === 'user' ? request.user.id : null,
+  }))
 })
 
 app.post('/api/items', requireUser, (request, response) => {
@@ -458,16 +489,18 @@ app.post('/api/items', requireUser, (request, response) => {
   const reporter = request.user.role === 'admin'
     ? submittedReporter || 'Anonymous (reported to staff)'
     : request.user.full_name
+  const type = cleanText(request.body.type)
   const item = {
     id: `item-${randomUUID()}`,
     title: cleanText(request.body.title),
     description: cleanText(request.body.description),
     location: cleanText(request.body.location),
-    type: cleanText(request.body.type),
+    type,
     reporter,
     date: new Date().toISOString().slice(0, 10),
     campus: request.user.campus,
     status: 'open',
+    reviewStatus: request.user.role === 'user' && type === 'found' ? 'pending' : 'approved',
   }
   requireFields(item, ['title', 'description', 'location', 'type'])
   if (item.type !== 'lost' && item.type !== 'found') throw new HttpError(400, 'Report type must be lost or found.')
@@ -478,14 +511,85 @@ app.post('/api/items', requireUser, (request, response) => {
   let emailRecipients = []
   withTransaction(() => {
     db.prepare(`
-      INSERT INTO items (id, title, description, location, type, reporter, date, created_by, campus, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(item.id, item.title, item.description, item.location, item.type, item.reporter, item.date, request.user.id, item.campus, item.status)
-    emailRecipients = createCampusNotifications(item, 'new_report', request.user.id)
+      INSERT INTO items (id, title, description, location, type, reporter, date, created_by, campus, status, review_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      item.id,
+      item.title,
+      item.description,
+      item.location,
+      item.type,
+      item.reporter,
+      item.date,
+      request.user.id,
+      item.campus,
+      item.status,
+      item.reviewStatus,
+    )
+    if (item.reviewStatus === 'approved') {
+      emailRecipients = createCampusNotifications(item, 'new_report', request.user.id)
+    }
   })
   void sendEmailNotifications(emailRecipients, item, 'new_report')
     .catch((error) => console.error('Could not send new-report email notifications.', error))
   response.status(201).json(item)
+})
+
+app.get('/api/claims', requireUser, requireStudent, (request, response) => {
+  const claims = db.prepare(`
+    SELECT claims.id, claims.item_id AS itemId, claims.proof, claims.status,
+      claims.created_at AS createdAt, claims.reviewed_at AS reviewedAt,
+      items.title, items.campus
+    FROM claims
+    JOIN items ON items.id = claims.item_id
+    WHERE claims.requester_id = ?
+    ORDER BY claims.created_at DESC
+    LIMIT 100
+  `).all(request.user.id)
+  response.json(claims)
+})
+
+app.post('/api/items/:id/claims', requireUser, requireStudent, (request, response) => {
+  const proof = cleanText(request.body.proof)
+  requireFields({ proof }, ['proof'])
+  if (proof.length > 2000) throw new HttpError(400, 'Claim details must be 2,000 characters or fewer.')
+
+  let claim
+  withTransaction(() => {
+    const item = db.prepare(`
+      SELECT id, title, type, status, campus,
+        review_status AS reviewStatus, created_by AS createdBy
+      FROM items WHERE id = ?
+    `).get(request.params.id)
+    if (!item) throw new HttpError(404, 'Found-item report not found.')
+    if (item.type !== 'found') throw new HttpError(400, 'Only found items can be claimed.')
+    if (item.reviewStatus !== 'approved' || item.status !== 'open') {
+      throw new HttpError(409, 'This found item is not currently available for claim requests.')
+    }
+    if (item.createdBy === request.user.id) {
+      throw new HttpError(400, 'You cannot submit a claim request for your own report.')
+    }
+
+    const existingClaim = db.prepare(`
+      SELECT id FROM claims WHERE item_id = ? AND requester_id = ? AND status = 'pending'
+    `).get(item.id, request.user.id)
+    if (existingClaim) throw new HttpError(409, 'You already have a pending request for this item.')
+
+    claim = {
+      id: `claim-${randomUUID()}`,
+      itemId: item.id,
+      proof,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      title: item.title,
+      campus: item.campus,
+    }
+    db.prepare(`
+      INSERT INTO claims (id, item_id, requester_id, proof, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(claim.id, claim.itemId, request.user.id, claim.proof, claim.status, claim.createdAt)
+  })
+  response.status(201).json(claim)
 })
 
 app.get('/api/admin/users', requireUser, requireAdmin, (request, response) => {
@@ -574,7 +678,130 @@ app.delete('/api/admin/users/:id', requireUser, requireAdmin, (request, response
 })
 
 app.get('/api/admin/items', requireUser, requireAdmin, (request, response) => {
-  response.json(listItems())
+  response.json(listItems({ includeUnreviewed: true }))
+})
+
+app.patch('/api/admin/items/:id/review', requireUser, requireAdmin, (request, response) => {
+  const reviewStatus = cleanText(request.body.reviewStatus)
+  if (reviewStatus !== 'approved' && reviewStatus !== 'rejected') {
+    throw new HttpError(400, 'Choose Approve or Reject for this report.')
+  }
+
+  let item
+  let emailRecipients = []
+  withTransaction(() => {
+    const existing = db.prepare('SELECT * FROM items WHERE id = ?').get(request.params.id)
+    if (!existing) throw new HttpError(404, 'Report not found.')
+    if (existing.type !== 'found' || existing.review_status !== 'pending') {
+      throw new HttpError(409, 'This report is not waiting for review.')
+    }
+
+    db.prepare('UPDATE items SET review_status = ? WHERE id = ?').run(reviewStatus, existing.id)
+    item = {
+      id: existing.id,
+      title: existing.title,
+      description: existing.description,
+      location: existing.location,
+      type: existing.type,
+      reporter: existing.reporter,
+      date: existing.date,
+      campus: existing.campus,
+      status: existing.status,
+      reviewStatus,
+      claimedAt: existing.claimed_at,
+    }
+    if (reviewStatus === 'approved') {
+      emailRecipients = createCampusNotifications(item, 'new_report', existing.created_by)
+    }
+  })
+
+  if (reviewStatus === 'approved') {
+    void sendEmailNotifications(emailRecipients, item, 'new_report')
+      .catch((error) => console.error('Could not send approved-report email notifications.', error))
+  }
+  response.json(item)
+})
+
+app.get('/api/admin/claims', requireUser, requireAdmin, (request, response) => {
+  const claims = db.prepare(`
+    SELECT claims.id, claims.item_id AS itemId, claims.proof, claims.status,
+      claims.created_at AS createdAt, claims.reviewed_at AS reviewedAt,
+      items.title, items.campus, users.full_name AS requesterName,
+      users.student_id AS requesterStudentId, users.email AS requesterEmail
+    FROM claims
+    JOIN items ON items.id = claims.item_id
+    JOIN users ON users.id = claims.requester_id
+    ORDER BY CASE claims.status WHEN 'pending' THEN 0 ELSE 1 END, claims.created_at DESC
+    LIMIT 200
+  `).all()
+  response.json(claims)
+})
+
+app.patch('/api/admin/claims/:id', requireUser, requireAdmin, (request, response) => {
+  const status = cleanText(request.body.status)
+  if (status !== 'approved' && status !== 'rejected') {
+    throw new HttpError(400, 'Choose Approve or Reject for this claim.')
+  }
+
+  const reviewedAt = new Date().toISOString()
+  let item
+  let emailRecipients = []
+  withTransaction(() => {
+    const claim = db.prepare(`
+      SELECT claims.id, claims.item_id AS itemId, claims.status AS claimStatus,
+        items.title, items.description, items.location, items.type, items.reporter,
+        items.date, items.campus, items.status AS itemStatus,
+        items.review_status AS reviewStatus
+      FROM claims
+      JOIN items ON items.id = claims.item_id
+      WHERE claims.id = ?
+    `).get(request.params.id)
+    if (!claim) throw new HttpError(404, 'Claim request not found.')
+    if (claim.claimStatus !== 'pending') throw new HttpError(409, 'This claim request has already been reviewed.')
+
+    if (status === 'approved' && (
+      claim.type !== 'found' || claim.itemStatus !== 'open' || claim.reviewStatus !== 'approved'
+    )) {
+      throw new HttpError(409, 'This found item is no longer available to claim.')
+    }
+
+    db.prepare(`
+      UPDATE claims SET status = ?, reviewed_at = ?, reviewed_by = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(status, reviewedAt, request.user.id, claim.id)
+
+    if (status === 'approved') {
+      db.prepare(`
+        UPDATE items SET status = 'claimed', claimed_at = ?, claimed_by = ?
+        WHERE id = ? AND status = 'open'
+      `).run(reviewedAt, request.user.id, claim.itemId)
+      db.prepare(`
+        UPDATE claims SET status = 'rejected', reviewed_at = ?, reviewed_by = ?
+        WHERE item_id = ? AND id != ? AND status = 'pending'
+      `).run(reviewedAt, request.user.id, claim.itemId, claim.id)
+
+      item = {
+        id: claim.itemId,
+        title: claim.title,
+        description: claim.description,
+        location: claim.location,
+        type: claim.type,
+        reporter: claim.reporter,
+        date: claim.date,
+        campus: claim.campus,
+        status: 'claimed',
+        reviewStatus: claim.reviewStatus,
+        claimedAt: reviewedAt,
+      }
+      emailRecipients = createCampusNotifications(item, 'claimed')
+    }
+  })
+
+  if (status === 'approved') {
+    void sendEmailNotifications(emailRecipients, item, 'claimed')
+      .catch((error) => console.error('Could not send claim-approval email notifications.', error))
+  }
+  response.json({ id: request.params.id, status, reviewedAt })
 })
 
 app.patch('/api/admin/items/:id', requireUser, requireAdmin, (request, response) => {
@@ -592,6 +819,9 @@ app.patch('/api/admin/items/:id', requireUser, requireAdmin, (request, response)
   if (item.type !== 'lost' && item.type !== 'found') throw new HttpError(400, 'Report type must be lost or found.')
   const status = request.body.status === undefined ? existing.status : cleanText(request.body.status)
   if (status !== 'open' && status !== 'claimed') throw new HttpError(400, 'Choose Open or Claimed / resolved.')
+  if (status === 'claimed' && existing.review_status !== 'approved') {
+    throw new HttpError(409, 'Approve the report before marking it claimed or resolved.')
+  }
   const claimedAt = status === 'claimed'
     ? existing.status === 'claimed' ? existing.claimed_at : new Date().toISOString()
     : null
@@ -603,6 +833,7 @@ app.patch('/api/admin/items/:id', requireUser, requireAdmin, (request, response)
     ...item,
     campus: existing.campus,
     status,
+    reviewStatus: existing.review_status,
     claimedAt,
   }
   let emailRecipients = []
@@ -624,6 +855,10 @@ app.patch('/api/admin/items/:id', requireUser, requireAdmin, (request, response)
       existing.id,
     )
     if (status === 'claimed' && existing.status !== 'claimed') {
+      db.prepare(`
+        UPDATE claims SET status = 'rejected', reviewed_at = ?, reviewed_by = ?
+        WHERE item_id = ? AND status = 'pending'
+      `).run(new Date().toISOString(), request.user.id, existing.id)
       emailRecipients = createCampusNotifications(updatedItem, 'claimed')
     }
   })

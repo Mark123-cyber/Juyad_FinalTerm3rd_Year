@@ -7,6 +7,7 @@ import AuthView from './views/AuthView'
 import DashboardView from './views/DashboardView'
 import FoundItemsView from './views/FoundItemsView'
 import LostItemsView from './views/LostItemsView'
+import MyClaimsView from './views/MyClaimsView'
 import ReportItemView from './views/ReportItemView'
 import './App.css'
 
@@ -27,6 +28,7 @@ function AppRoutes() {
 
   if (!user) return <Navigate to="/" replace />
   if (pathname === '/admin' && user.role !== 'admin') return <Navigate to="/dashboard" replace />
+  if (pathname === '/claims' && user.role !== 'user') return <Navigate to="/admin" replace />
 
   return (
     <>
@@ -35,6 +37,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<DashboardView />} />
         <Route path="/lost" element={<LostItemsView />} />
         <Route path="/found" element={<FoundItemsView />} />
+        <Route path="/claims" element={<MyClaimsView />} />
         <Route path="/report" element={<ReportItemView />} />
         <Route path="/admin" element={<AdminView />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -16,7 +16,11 @@ The SQLite database is created at `server/data/lost-and-found.sqlite` and is exc
 
 ## Student alerts and report follow-up
 
-Students can report lost and found items directly. Staff accounts can also report either type for people who visit their office; the walk-in reporter's name is optional, and leaving it blank keeps it private. Student dashboards show searchable campus reports and an in-app notification bell. New reports and staff-confirmed claim/resolution updates notify student accounts assigned to the report's campus; the student who submitted a new report does not receive a duplicate alert. Notification events are retained in the database and appear the next time a student signs in. The notification bell refreshes while the app is open.
+Students can report lost and found items directly. Lost reports are published immediately; student-submitted found reports remain visible only to the reporter and staff until staff approves them. Staff-submitted reports are published immediately, and the walk-in reporter's name is optional. Approved reports appear in searchable campus listings and notify students assigned to the item's campus.
+
+Students can submit a private claim request for an open, approved found item by describing an identifying detail that is not shown in the public report. Only the requester and authorized staff can view those details. Students can track requests under **My Claims**. Staff review found reports and claim requests in the shared staff dashboard. Approving a claim marks the item claimed/resolved and notifies students at that campus; other pending claims for the same item are closed. Rejected requests remain visible to the requester and may be resubmitted with additional information.
+
+The in-app notification bell shows new approved reports and staff-confirmed claim/resolution updates. The student who submitted a report does not receive a duplicate new-report alert. Notification events are retained in the database and appear the next time a student signs in. The notification bell refreshes while the app is open.
 
 Email alerts are sent to campus student accounts with an email address when SMTP is configured. Add your SMTP provider's settings to the private `.env` file and restart the API:
 
@@ -35,7 +39,7 @@ Administrators should mark a report **Claimed / resolved** only after campus sta
 
 ## Administrator tools
 
-Administrators can search and filter campus reports, mark verified returns as claimed/resolved, add/edit/remove user accounts, assign Student IDs and optional email addresses, change user roles and reset passwords, edit or remove any lost/found report, and add/remove campus choices. The fixed admin account cannot be removed or have its login, role, or password changed from the dashboard. Removing a campus that is assigned to an account is blocked until those accounts are moved to another campus.
+Authorized staff share one dashboard to review found reports and claim requests, search and filter campus reports, mark verified returns as claimed/resolved, add/edit/remove user accounts, assign Student IDs and optional email addresses, change user roles and reset passwords, edit or remove any lost/found report, and add/remove campus choices. Student accounts must be created by staff; public self-registration is disabled. The fixed admin account cannot be removed or have its login, role, or password changed from the dashboard. Removing a campus that is assigned to an account is blocked until those accounts are moved to another campus.
 
 The initial campus choices are San Juan, Hinunangan, Sogod, Bontoc, and Maasin.
 

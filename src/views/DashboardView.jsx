@@ -98,9 +98,15 @@ export default function DashboardView() {
                   <div className="card-top">
                     <span className={`pill ${item.type === 'lost' ? 'warning' : 'success'}`}>{item.type}</span>
                     <span className="dashboard-report-badges">
-                      <span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>
-                        {item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}
-                      </span>
+                      {item.reviewStatus === 'pending' ? (
+                        <span className="item-status pending">Pending staff review</span>
+                      ) : item.reviewStatus === 'rejected' ? (
+                        <span className="item-status rejected">Not approved</span>
+                      ) : (
+                        <span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>
+                          {item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}
+                        </span>
+                      )}
                       <time className="date-badge" dateTime={item.date}>
                         <CalendarDays size={14} aria-hidden="true" />
                         {item.date}

@@ -1,6 +1,6 @@
 import { Building2, CalendarDays, MapPin, PackageOpen } from 'lucide-react'
 
-export default function ItemListView({ title, description, items, loading, error }) {
+export default function ItemListView({ title, description, items, loading, error, extraError, renderItemAction }) {
   return (
     <main className="page-shell">
       <section className="page-header stacked">
@@ -12,6 +12,7 @@ export default function ItemListView({ title, description, items, loading, error
       </section>
 
       {error && <p className="form-error" role="alert">{error}</p>}
+      {extraError && <p className="form-error" role="alert">{extraError}</p>}
       {loading ? (
         <p className="empty-inline">Loading reports…</p>
       ) : items.length > 0 ? (
@@ -23,9 +24,15 @@ export default function ItemListView({ title, description, items, loading, error
                   {item.type}
                 </span>
                 <span className="item-list-meta">
-                  <span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>
-                    {item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}
-                  </span>
+                  {item.reviewStatus === 'pending' ? (
+                    <span className="item-status pending">Pending staff review</span>
+                  ) : item.reviewStatus === 'rejected' ? (
+                    <span className="item-status rejected">Not approved</span>
+                  ) : (
+                    <span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>
+                      {item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}
+                    </span>
+                  )}
                   <time className="date-badge" dateTime={item.date}>
                     <CalendarDays size={14} aria-hidden="true" />
                     {item.date}
@@ -42,6 +49,7 @@ export default function ItemListView({ title, description, items, loading, error
                 <MapPin size={16} aria-hidden="true" />
                 {item.location}
               </p>
+              {renderItemAction?.(item)}
             </article>
           ))}
         </section>

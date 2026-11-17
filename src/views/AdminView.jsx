@@ -13,10 +13,11 @@ const EMPTY_USER = {
 }
 
 export default function AdminView() {
-  const { items, loading: itemsLoading, error: itemsError, updateItem, deleteItem } = useItems()
+  const { items, loading: itemsLoading, error: itemsError, refreshItems, updateItem, deleteItem } = useItems()
   const [section, setSection] = useState('reports')
   const [users, setUsers] = useState([])
   const [campuses, setCampuses] = useState([])
+  const [claims, setClaims] = useState([])
   const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -27,27 +28,33 @@ export default function AdminView() {
   const [reportQuery, setReportQuery] = useState('')
   const [reportType, setReportType] = useState('all')
   const [reportStatus, setReportStatus] = useState('all')
+  const [reportReviewStatus, setReportReviewStatus] = useState('all')
+  const [processingId, setProcessingId] = useState(null)
 
   const lostCount = items.filter((item) => item.type === 'lost').length
   const foundCount = items.filter((item) => item.type === 'found').length
   const openCount = items.filter((item) => item.status !== 'claimed').length
+  const pendingClaimCount = claims.filter((claim) => claim.status === 'pending').length
   const filteredReports = items.filter((item) => {
     const matchesType = reportType === 'all' || item.type === reportType
     const matchesStatus = reportStatus === 'all' || item.status === reportStatus
+    const matchesReviewStatus = reportReviewStatus === 'all' || item.reviewStatus === reportReviewStatus
     const searchableText = `${item.title} ${item.description} ${item.location} ${item.reporter} ${item.campus}`.toLowerCase()
-    return matchesType && matchesStatus && searchableText.includes(reportQuery.trim().toLowerCase())
+    return matchesType && matchesStatus && matchesReviewStatus && searchableText.includes(reportQuery.trim().toLowerCase())
   })
 
   const loadAdminData = async () => {
     setError('')
-    const [nextUsers, nextCampuses, notificationSettings] = await Promise.all([
+    const [nextUsers, nextCampuses, notificationSettings, nextClaims] = await Promise.all([
       apiRequest('/api/admin/users'),
       apiRequest('/api/campuses'),
       apiRequest('/api/admin/notification-settings'),
+      apiRequest('/api/admin/claims'),
     ])
     setUsers(nextUsers)
     setCampuses(nextCampuses)
     setEmailNotificationsEnabled(notificationSettings.emailNotificationsEnabled)
+    setClaims(nextClaims)
   }
 
   useEffect(() => {
@@ -56,12 +63,14 @@ export default function AdminView() {
       apiRequest('/api/admin/users'),
       apiRequest('/api/campuses'),
       apiRequest('/api/admin/notification-settings'),
+      apiRequest('/api/admin/claims'),
     ])
-      .then(([nextUsers, nextCampuses, notificationSettings]) => {
+      .then(([nextUsers, nextCampuses, notificationSettings, nextClaims]) => {
         if (active) {
           setUsers(nextUsers)
           setCampuses(nextCampuses)
           setEmailNotificationsEnabled(notificationSettings.emailNotificationsEnabled)
+          setClaims(nextClaims)
         }
       })
       .catch((loadError) => {
@@ -72,6 +81,27 @@ export default function AdminView() {
       })
     return () => { active = false }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const refreshStaffQueue = async () => {
+      try {
+        const [, nextClaims] = await Promise.all([
+          refreshItems(),
+          apiRequest('/api/admin/claims'),
+        ])
+        if (active) setClaims(nextClaims)
+      } catch (loadError) {
+        if (active) setError(loadError.message)
+      }
+    }
+
+    const intervalId = window.setInterval(refreshStaffQueue, 30000)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [refreshItems])
 
   const showError = (actionError) => {
     setNotice('')
@@ -129,6 +159,46 @@ export default function AdminView() {
     }
   }
 
+  const handleReviewReport = async (item, reviewStatus) => {
+    const action = reviewStatus === 'approved' ? 'Approve' : 'Reject'
+    if (!window.confirm(`${action} the found-item report “${item.title}”?`)) return
+    setProcessingId(item.id)
+    setError('')
+    setNotice('')
+    try {
+      await apiRequest(`/api/admin/items/${encodeURIComponent(item.id)}/review`, {
+        method: 'PATCH',
+        body: JSON.stringify({ reviewStatus }),
+      })
+      await refreshItems()
+      setNotice(reviewStatus === 'approved' ? 'Found-item report approved and published.' : 'Found-item report rejected.')
+    } catch (actionError) {
+      showError(actionError)
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
+  const handleReviewClaim = async (claim, status) => {
+    const action = status === 'approved' ? 'Approve' : 'Reject'
+    if (!window.confirm(`${action} ${claim.requesterName}’s claim for “${claim.title}”?`)) return
+    setProcessingId(claim.id)
+    setError('')
+    setNotice('')
+    try {
+      await apiRequest(`/api/admin/claims/${encodeURIComponent(claim.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      })
+      await Promise.all([loadAdminData(), status === 'approved' ? refreshItems() : Promise.resolve()])
+      setNotice(status === 'approved' ? 'Claim approved and item marked claimed.' : 'Claim request rejected.')
+    } catch (actionError) {
+      showError(actionError)
+    } finally {
+      setProcessingId(null)
+    }
+  }
+
   const handleDeleteReport = async (item) => {
     if (!window.confirm(`Remove the report for “${item.title}”?`)) return
     setError('')
@@ -152,7 +222,7 @@ export default function AdminView() {
       })
       setCampuses((currentCampuses) => [...currentCampuses, campus.name])
       setCampusName('')
-      setNotice('Campus added to sign-up choices.')
+      setNotice('Campus added to account choices.')
     } catch (actionError) {
       showError(actionError)
     }
@@ -236,6 +306,9 @@ export default function AdminView() {
           <button type="button" role="tab" aria-selected={section === 'reports'} className={section === 'reports' ? 'admin-tab active' : 'admin-tab'} onClick={() => setSection('reports')}>
             <ShieldCheck size={16} /> Reports <span>{items.length}</span>
           </button>
+          <button type="button" role="tab" aria-selected={section === 'claims'} className={section === 'claims' ? 'admin-tab active' : 'admin-tab'} onClick={() => setSection('claims')}>
+            <PackageCheck size={16} /> Claims <span>{pendingClaimCount}</span>
+          </button>
           <button type="button" role="tab" aria-selected={section === 'users'} className={section === 'users' ? 'admin-tab active' : 'admin-tab'} onClick={() => setSection('users')}>
             <Users size={16} /> Users <span>{users.length}</span>
           </button>
@@ -300,6 +373,15 @@ export default function AdminView() {
                   <option value="claimed">Claimed / resolved</option>
                 </select>
               </label>
+              <label className="admin-report-type">
+                <span>Review state</span>
+                <select value={reportReviewStatus} onChange={(event) => setReportReviewStatus(event.target.value)}>
+                  <option value="all">All review states</option>
+                  <option value="pending">Awaiting review</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
               <p className="admin-filter-count" aria-live="polite">
                 {itemsLoading ? 'Loading reports…' : `${filteredReports.length} ${filteredReports.length === 1 ? 'report' : 'reports'}`}
               </p>
@@ -307,7 +389,7 @@ export default function AdminView() {
             {itemsError ? <p className="form-error" role="alert">{itemsError}</p> : itemsLoading ? <p className="empty-inline">Loading reports…</p> : filteredReports.length ? (
               <div className="table-wrap">
                 <table className="admin-table">
-                  <thead><tr><th>Item</th><th>Reporter</th><th>Campus</th><th>Type</th><th>Status</th><th>Date reported</th><th>Actions</th></tr></thead>
+                  <thead><tr><th>Item</th><th>Reporter</th><th>Campus</th><th>Type</th><th>Status</th><th>Review</th><th>Date reported</th><th>Actions</th></tr></thead>
                   <tbody>{filteredReports.map((item) => (
                     <tr key={item.id}>
                       <td><span className="item-title">{item.title}</span><small>{item.location}</small></td>
@@ -315,8 +397,17 @@ export default function AdminView() {
                       <td>{item.campus}</td>
                       <td><span className={`pill ${item.type === 'lost' ? 'warning' : 'success'}`}>{item.type}</span></td>
                       <td><span className={`item-status ${item.status === 'claimed' ? 'claimed' : 'open'}`}>{item.status === 'claimed' ? 'Claimed / resolved' : 'Open'}</span></td>
+                      <td><span className={`review-status ${item.reviewStatus}`}>
+                        {item.reviewStatus === 'pending' ? 'Awaiting review' : item.reviewStatus === 'rejected' ? 'Rejected' : 'Approved'}
+                      </span></td>
                       <td>{item.date}</td>
                       <td><div className="admin-row-actions">
+                        {item.reviewStatus === 'pending' && (
+                          <>
+                            <button type="button" className="admin-review-action approve" onClick={() => handleReviewReport(item, 'approved')} disabled={processingId === item.id}>Approve</button>
+                            <button type="button" className="admin-review-action reject" onClick={() => handleReviewReport(item, 'rejected')} disabled={processingId === item.id}>Reject</button>
+                          </>
+                        )}
                         <button type="button" className="admin-icon-btn" onClick={() => beginEditReport(item)} aria-label={`Edit ${item.title}`}><Pencil size={15} /></button>
                         <button type="button" className="admin-icon-btn danger" onClick={() => handleDeleteReport(item)} aria-label={`Delete ${item.title}`}><Trash2 size={15} /></button>
                       </div></td>
@@ -327,11 +418,52 @@ export default function AdminView() {
             ) : items.length ? (
               <div className="admin-filter-empty">
                 <p>No reports match your search and type filter.</p>
-                <button type="button" className="secondary-btn" onClick={() => { setReportQuery(''); setReportType('all'); setReportStatus('all') }}>
+                <button type="button" className="secondary-btn" onClick={() => { setReportQuery(''); setReportType('all'); setReportStatus('all'); setReportReviewStatus('all') }}>
                   Clear filters
                 </button>
               </div>
             ) : <p className="empty-inline">No reports to manage.</p>}
+          </section>
+        )}
+
+        {!loading && section === 'claims' && (
+          <section className="admin-section">
+            <div className="admin-section-heading">
+              <div>
+                <h2>Student claim requests</h2>
+                <p>Review identifying details privately. Approving a request marks the found item as claimed.</p>
+              </div>
+            </div>
+            {claims.length ? (
+              <div className="table-wrap">
+                <table className="admin-table">
+                  <thead><tr><th>Found item</th><th>Requester</th><th>Campus</th><th>Verification details</th><th>Submitted</th><th>Status</th><th>Actions</th></tr></thead>
+                  <tbody>{claims.map((claim) => (
+                    <tr key={claim.id}>
+                      <td><span className="item-title">{claim.title}</span></td>
+                      <td>
+                        <span className="item-title">{claim.requesterName}</span>
+                        <small>{claim.requesterStudentId || claim.requesterEmail || 'No email provided'}</small>
+                      </td>
+                      <td>{claim.campus}</td>
+                      <td className="claim-proof-cell">{claim.proof}</td>
+                      <td>{new Date(claim.createdAt).toLocaleDateString()}</td>
+                      <td><span className={`claim-status ${claim.status}`}>
+                        {claim.status === 'pending' ? 'Pending' : claim.status === 'approved' ? 'Approved' : 'Rejected'}
+                      </span></td>
+                      <td><div className="admin-row-actions">
+                        {claim.status === 'pending' && (
+                          <>
+                            <button type="button" className="admin-review-action approve" onClick={() => handleReviewClaim(claim, 'approved')} disabled={processingId === claim.id}>Approve</button>
+                            <button type="button" className="admin-review-action reject" onClick={() => handleReviewClaim(claim, 'rejected')} disabled={processingId === claim.id}>Reject</button>
+                          </>
+                        )}
+                      </div></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : <p className="empty-inline">No claim requests yet.</p>}
           </section>
         )}
 
@@ -388,7 +520,7 @@ export default function AdminView() {
         {!loading && section === 'campuses' && (
           <section className="admin-section">
             <div className="admin-section-heading">
-              <div><h2>Sign-up campus choices</h2><p>Changes here are reflected in the account sign-up dropdown.</p></div>
+              <div><h2>Campus choices</h2><p>These choices are used when staff create accounts.</p></div>
             </div>
             <form className="campus-add-form" onSubmit={handleCampusSubmit}>
               <label className="sr-only" htmlFor="new-campus">New campus name</label>

@@ -50,8 +50,9 @@ test('existing reports gain campus and open status without losing their original
     const serverUrl = pathToFileURL(serverPath).href
     const script = `
       const { db } = await import(${JSON.stringify(serverUrl)})
-      const item = db.prepare('SELECT title, campus, status FROM items WHERE id = ?').get('legacy-item')
-      console.log(JSON.stringify(item))
+      const item = db.prepare('SELECT title, campus, status, review_status AS reviewStatus FROM items WHERE id = ?').get('legacy-item')
+      const claimsTableExists = Boolean(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'claims'").get())
+      console.log(JSON.stringify({ item, claimsTableExists }))
       db.close()
     `
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
@@ -70,8 +71,11 @@ test('existing reports gain campus and open status without losing their original
     })
 
     assert.equal(result.status, 0, result.stderr)
-    const migratedItem = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1))
-    assert.deepEqual(migratedItem, { title: 'Old backpack', campus: 'Sogod', status: 'open' })
+    const migrationResult = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1))
+    assert.deepEqual(migrationResult, {
+      item: { title: 'Old backpack', campus: 'Sogod', status: 'open', reviewStatus: 'approved' },
+      claimsTableExists: true,
+    })
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }

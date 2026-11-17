@@ -159,6 +159,7 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   assert.equal(report.payload.reporter, 'Sample Student')
   assert.equal(report.payload.campus, 'Sogod')
   assert.equal(report.payload.status, 'open')
+  assert.equal(report.payload.reviewStatus, 'approved')
 
   const listedItems = await request('/api/items', { cookie: studentIdLogin.cookie })
   const listedReport = listedItems.payload.find((item) => item.id === report.payload.id)
@@ -377,6 +378,79 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(studentFoundReport.response.status, 201)
   assert.equal(studentFoundReport.payload.reporter, 'Sample Student')
+  assert.equal(studentFoundReport.payload.reviewStatus, 'pending')
+
+  const pendingReportVisibleToReporter = await request('/api/items', { cookie: studentIdLogin.cookie })
+  assert.equal(pendingReportVisibleToReporter.payload.find((item) => item.id === studentFoundReport.payload.id).reviewStatus, 'pending')
+
+  const hiddenPendingReport = await request('/api/items', { cookie: sameCampusStudentCookie })
+  assert.equal(hiddenPendingReport.payload.some((item) => item.id === studentFoundReport.payload.id), false)
+  const pendingReportNotifications = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(pendingReportNotifications.payload.notifications.some((notification) => notification.itemId === studentFoundReport.payload.id), false)
+
+  const prematureClaim = await request(`/api/items/${encodeURIComponent(studentFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: sameCampusStudentCookie,
+    body: { proof: 'I can identify a detail not in the report.' },
+  })
+  assert.equal(prematureClaim.response.status, 409)
+
+  const staffReports = await request('/api/admin/items', { cookie: adminLogin.cookie })
+  assert.equal(staffReports.response.status, 200)
+  assert.equal(staffReports.payload.find((item) => item.id === studentFoundReport.payload.id).reviewStatus, 'pending')
+
+  const approvedStudentReport = await request(`/api/admin/items/${encodeURIComponent(studentFoundReport.payload.id)}/review`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: { reviewStatus: 'approved' },
+  })
+  assert.equal(approvedStudentReport.response.status, 200)
+  assert.equal(approvedStudentReport.payload.reviewStatus, 'approved')
+
+  const visibleApprovedReport = await request('/api/items', { cookie: sameCampusStudentCookie })
+  assert.equal(visibleApprovedReport.payload.some((item) => item.id === studentFoundReport.payload.id), true)
+  const approvalNotification = await request('/api/notifications', { cookie: sameCampusStudentCookie })
+  assert.equal(approvalNotification.payload.notifications.some((notification) => (
+    notification.itemId === studentFoundReport.payload.id && notification.eventType === 'new_report'
+  )), true)
+
+  const ownReportClaim = await request(`/api/items/${encodeURIComponent(studentFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: studentIdLogin.cookie,
+    body: { proof: 'I can identify a detail not in the report.' },
+  })
+  assert.equal(ownReportClaim.response.status, 400)
+
+  const rejectedStudentReport = await request('/api/items', {
+    method: 'POST',
+    cookie: studentIdLogin.cookie,
+    body: {
+      title: 'Found notebook',
+      description: 'Notebook found near the library',
+      location: 'Library',
+      type: 'found',
+    },
+  })
+  assert.equal(rejectedStudentReport.response.status, 201)
+  const deniedReview = await request(`/api/admin/items/${encodeURIComponent(rejectedStudentReport.payload.id)}/review`, {
+    method: 'PATCH',
+    cookie: studentIdLogin.cookie,
+    body: { reviewStatus: 'approved' },
+  })
+  assert.equal(deniedReview.response.status, 403)
+
+  const rejectedReport = await request(`/api/admin/items/${encodeURIComponent(rejectedStudentReport.payload.id)}/review`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: { reviewStatus: 'rejected' },
+  })
+  assert.equal(rejectedReport.response.status, 200)
+  assert.equal(rejectedReport.payload.reviewStatus, 'rejected')
+  const rejectedReportVisibleToReporter = await request('/api/items', { cookie: studentIdLogin.cookie })
+  assert.equal(rejectedReportVisibleToReporter.payload.some((item) => item.id === rejectedStudentReport.payload.id), true)
+  assert.equal(rejectedReportVisibleToReporter.payload.find((item) => item.id === rejectedStudentReport.payload.id).reviewStatus, 'rejected')
+  const rejectedReportHiddenFromOtherStudents = await request('/api/items', { cookie: sameCampusStudentCookie })
+  assert.equal(rejectedReportHiddenFromOtherStudents.payload.some((item) => item.id === rejectedStudentReport.payload.id), false)
 
   const staffFoundReport = await request('/api/items', {
     method: 'POST',
@@ -391,6 +465,109 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   })
   assert.equal(staffFoundReport.response.status, 201)
   assert.equal(staffFoundReport.payload.reporter, 'Walk-in student')
+  assert.equal(staffFoundReport.payload.reviewStatus, 'approved')
+
+  const claimRequest = await request(`/api/items/${encodeURIComponent(staffFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: studentIdLogin.cookie,
+    body: { proof: 'The underside has a small initials engraving.' },
+  })
+  assert.equal(claimRequest.response.status, 201)
+  assert.equal(claimRequest.payload.status, 'pending')
+
+  const competingClaimRequest = await request(`/api/items/${encodeURIComponent(staffFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: differentCampusStudentCookie,
+    body: { proof: 'I can describe a unique mark on this umbrella.' },
+  })
+  assert.equal(competingClaimRequest.response.status, 201)
+
+  const duplicateClaimRequest = await request(`/api/items/${encodeURIComponent(staffFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: studentIdLogin.cookie,
+    body: { proof: 'I have another identifying detail.' },
+  })
+  assert.equal(duplicateClaimRequest.response.status, 409)
+
+  const studentClaims = await request('/api/claims', { cookie: studentIdLogin.cookie })
+  assert.equal(studentClaims.response.status, 200)
+  assert.equal(studentClaims.payload[0].proof, 'The underside has a small initials engraving.')
+  assert.equal(studentClaims.payload[0].status, 'pending')
+
+  const otherStudentClaims = await request('/api/claims', { cookie: differentCampusStudentCookie })
+  assert.equal(otherStudentClaims.payload.length, 1)
+  assert.equal(otherStudentClaims.payload[0].id, competingClaimRequest.payload.id)
+  assert.equal(otherStudentClaims.payload[0].proof, 'I can describe a unique mark on this umbrella.')
+
+  const deniedClaimQueue = await request('/api/admin/claims', { cookie: studentIdLogin.cookie })
+  assert.equal(deniedClaimQueue.response.status, 403)
+
+  const adminClaims = await request('/api/admin/claims', { cookie: adminLogin.cookie })
+  assert.equal(adminClaims.response.status, 200)
+  assert.equal(adminClaims.payload.find((claim) => claim.id === claimRequest.payload.id).proof, 'The underside has a small initials engraving.')
+
+  const deniedClaimReview = await request(`/api/admin/claims/${encodeURIComponent(claimRequest.payload.id)}`, {
+    method: 'PATCH',
+    cookie: studentIdLogin.cookie,
+    body: { status: 'approved' },
+  })
+  assert.equal(deniedClaimReview.response.status, 403)
+
+  const approvedClaim = await request(`/api/admin/claims/${encodeURIComponent(claimRequest.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: { status: 'approved' },
+  })
+  assert.equal(approvedClaim.response.status, 200)
+  assert.equal(approvedClaim.payload.status, 'approved')
+
+  const updatedMyClaims = await request('/api/claims', { cookie: studentIdLogin.cookie })
+  assert.equal(updatedMyClaims.payload[0].status, 'approved')
+
+  const closedCompetingClaim = await request('/api/claims', { cookie: differentCampusStudentCookie })
+  assert.equal(closedCompetingClaim.payload[0].id, competingClaimRequest.payload.id)
+  assert.equal(closedCompetingClaim.payload[0].status, 'rejected')
+
+  const claimedItems = await request('/api/items', { cookie: differentCampusStudentCookie })
+  assert.equal(claimedItems.payload.find((item) => item.id === staffFoundReport.payload.id).status, 'claimed')
+  const claimResolutionNotification = await request('/api/notifications', { cookie: differentCampusStudentCookie })
+  assert.equal(claimResolutionNotification.payload.notifications.some((notification) => (
+    notification.itemId === staffFoundReport.payload.id && notification.eventType === 'claimed'
+  )), true)
+
+  const resubmissionAfterApproval = await request(`/api/items/${encodeURIComponent(staffFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: differentCampusStudentCookie,
+    body: { proof: 'Another claim after approval.' },
+  })
+  assert.equal(resubmissionAfterApproval.response.status, 409)
+
+  const secondFoundReport = await request('/api/items', {
+    method: 'POST',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Found scarf',
+      description: 'Scarf turned in at the office',
+      location: 'Student services office',
+      type: 'found',
+    },
+  })
+  assert.equal(secondFoundReport.response.status, 201)
+
+  const rejectedClaimRequest = await request(`/api/items/${encodeURIComponent(secondFoundReport.payload.id)}/claims`, {
+    method: 'POST',
+    cookie: differentCampusStudentCookie,
+    body: { proof: 'My scarf is a different color from the listed description.' },
+  })
+  assert.equal(rejectedClaimRequest.response.status, 201)
+
+  const rejectedClaim = await request(`/api/admin/claims/${encodeURIComponent(rejectedClaimRequest.payload.id)}`, {
+    method: 'PATCH',
+    cookie: adminLogin.cookie,
+    body: { status: 'rejected' },
+  })
+  assert.equal(rejectedClaim.response.status, 200)
+  assert.equal(rejectedClaim.payload.status, 'rejected')
 
   const privateStaffReport = await request('/api/items', {
     method: 'POST',
