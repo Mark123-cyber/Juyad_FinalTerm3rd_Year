@@ -383,6 +383,47 @@ test('accounts, roles, reports, and campus choices are persisted and protected',
   assert.equal(reclaimNotification.payload.notifications.length, 3)
   assert.equal(reclaimNotification.payload.unreadCount, 1)
 
+  const studentFoundReport = await request('/api/items', {
+    method: 'POST',
+    cookie: signup.cookie,
+    body: {
+      title: 'Found keys',
+      description: 'Keys found near the library',
+      location: 'Library',
+      type: 'found',
+      reporter: 'Someone else',
+    },
+  })
+  assert.equal(studentFoundReport.response.status, 201)
+  assert.equal(studentFoundReport.payload.reporter, 'Sample Student')
+
+  const staffFoundReport = await request('/api/items', {
+    method: 'POST',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Found umbrella',
+      description: 'Black umbrella turned in at the office',
+      location: 'Registrar office',
+      type: 'found',
+      reporter: 'Walk-in student',
+    },
+  })
+  assert.equal(staffFoundReport.response.status, 201)
+  assert.equal(staffFoundReport.payload.reporter, 'Walk-in student')
+
+  const privateStaffReport = await request('/api/items', {
+    method: 'POST',
+    cookie: adminLogin.cookie,
+    body: {
+      title: 'Lost notebook',
+      description: 'Blue notebook reported at the office',
+      location: 'Registrar office',
+      type: 'lost',
+    },
+  })
+  assert.equal(privateStaffReport.response.status, 201)
+  assert.equal(privateStaffReport.payload.reporter, 'Anonymous (reported to staff)')
+
   const logout = await request('/api/auth/logout', { method: 'POST', cookie: signup.cookie })
   assert.equal(logout.response.status, 204)
   const expiredAccess = await request('/api/items', { cookie: signup.cookie })

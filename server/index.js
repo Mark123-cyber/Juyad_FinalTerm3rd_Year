@@ -481,13 +481,17 @@ app.get('/api/items', requireUser, (request, response) => {
 })
 
 app.post('/api/items', requireUser, (request, response) => {
+  const submittedReporter = request.user.role === 'admin' ? cleanText(request.body.reporter) : ''
+  const reporter = request.user.role === 'admin'
+    ? submittedReporter || 'Anonymous (reported to staff)'
+    : request.user.full_name
   const item = {
     id: `item-${randomUUID()}`,
     title: cleanText(request.body.title),
     description: cleanText(request.body.description),
     location: cleanText(request.body.location),
     type: cleanText(request.body.type),
-    reporter: request.user.full_name,
+    reporter,
     date: new Date().toISOString().slice(0, 10),
     campus: request.user.campus,
     status: 'open',
@@ -497,6 +501,7 @@ app.post('/api/items', requireUser, (request, response) => {
   if ([item.title, item.description, item.location].some((value) => value.length > 2000)) {
     throw new HttpError(400, 'Report fields must be 2,000 characters or fewer.')
   }
+  if (submittedReporter.length > 120) throw new HttpError(400, 'Reporter name must be 120 characters or fewer.')
   let emailRecipients = []
   withTransaction(() => {
     db.prepare(`

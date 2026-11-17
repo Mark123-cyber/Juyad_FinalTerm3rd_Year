@@ -16,7 +16,7 @@ The SQLite database is created at `server/data/lost-and-found.sqlite` and is exc
 
 ## Student alerts and report follow-up
 
-Student dashboards show searchable campus reports and an in-app notification bell. New reports and staff-confirmed claim/resolution updates notify student accounts assigned to the report's campus; the student who submitted a new report does not receive a duplicate alert. Notification events are retained in the database and appear the next time a student signs in. The notification bell refreshes while the app is open.
+Students can report lost and found items directly. Staff accounts can also report either type for people who visit their office; the walk-in reporter's name is optional, and leaving it blank keeps it private. Student dashboards show searchable campus reports and an in-app notification bell. New reports and staff-confirmed claim/resolution updates notify student accounts assigned to the report's campus; the student who submitted a new report does not receive a duplicate alert. Notification events are retained in the database and appear the next time a student signs in. The notification bell refreshes while the app is open.
 
 Email alerts are sent to campus student accounts with an email address when SMTP is configured. Add your SMTP provider's settings to the private `.env` file and restart the API:
 
